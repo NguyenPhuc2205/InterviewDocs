@@ -1,43 +1,43 @@
-# NestJS Dependency Injection — Deep Dive Toàn Tập (Part 2)
+# NestJS Dependency Injection — Giải Phẫu Toàn Tập (Phần 2)
 
-## Advanced DI, Lifecycle & Phỏng vấn
+## DI nâng cao, Vòng đời & Phỏng vấn
 
-> Tiếp nối Part 1 (Nền tảng & Cơ chế). Part 2 bao gồm các chủ đề nâng cao và toàn bộ nội dung chuẩn bị phỏng vấn.
+> Tiếp nối Phần 1 (Nền tảng & Cơ chế). Phần 2 bao gồm các chủ đề nâng cao và toàn bộ nội dung chuẩn bị phỏng vấn.
 
 ---
 
-## MỤC LỤC PART 2
+## MỤC LỤC PHẦN 2
 
-**Phần VI — Injection Scopes (Deep Dive)**
+**Phần VI — Injection Scopes (Chi tiết)**
 
 11. [Injection Scopes — DEFAULT / REQUEST / TRANSIENT](#11-injection-scopes)
-12. [Scope Bubbling & Lifetime Mismatch — Hiệu ứng dây chuyền](#12-scope-bubbling--lifetime-mismatch)
-13. [Durable Providers — Giải pháp cho REQUEST scope overhead](#13-durable-providers)
+12. [Hiệu ứng Scope Bubbling & Lifetime Mismatch — Hiệu ứng dây chuyền](#12-scope-bubbling--lifetime-mismatch)
+13. [Durable Providers — Giải pháp cho chi phí REQUEST scope](#13-durable-providers)
 
-**Phần VII — Circular Dependencies**
+**Phần VII — Phụ thuộc vòng**
 
-14. [Circular Dependencies & forwardRef — Giải phẫu đầy đủ](#14-circular-dependencies--forwardref)
+14. [Phụ thuộc vòng & forwardRef — Giải phẫu đầy đủ](#14-phụ-thuộc-vòng--forwardref)
 
-**Phần VIII — Dynamic Resolution**
+**Phần VIII — Phân giải động**
 
-15. [Optional Dependencies — @Optional()](#15-optional-dependencies)
-16. [LazyModuleLoader & ModuleRef — Resolution tại runtime](#16-lazymoduleloader--moduleref)
+15. [Dependency tùy chọn — @Optional()](#15-dependency-tùy-chọn)
+16. [LazyModuleLoader & ModuleRef — Phân giải khi chạy](#16-lazymoduleloader--moduleref)
 
-**Phần IX — Lifecycle & Request Pipeline**
+**Phần IX — Vòng đời & Luồng xử lý Request**
 
-17. [Lifecycle Hooks & DI — Thứ tự khởi tạo và shutdown](#17-lifecycle-hooks--di)
-18. [Module Distance & Topology Tree](#18-module-distance--topology-tree)
-19. [Enhancers (Guards, Interceptors, Pipes, Filters) & DI](#19-enhancers--di)
+17. [Lifecycle Hooks & DI — Thứ tự khởi tạo và tắt](#17-lifecycle-hooks--di)
+18. [Module Distance & cây Topology](#18-module-distance--cây-topology)
+19. [Thành phần mở rộng (Guards, Interceptors, Pipes, Filters) & DI](#19-thành-phần-mở-rộng--di)
 
 **Phần X — Thực hành & Phỏng vấn**
 
 20. [Thực hành: Phân tích MailModule từ dự án thật](#20-thực-hành-phân-tích-mailmodule)
-21. [Common Myths — 10 hiểu lầm phổ biến](#21-common-myths)
-22. [Cách trả lời phỏng vấn — 20 câu Q&A mẫu](#22-interview-qa)
+21. [10 hiểu lầm phổ biến](#21-10-hiểu-lầm-phổ-biến)
+22. [Cách trả lời phỏng vấn — 20 câu Q&A mẫu](#22-phỏng-vấn-qa)
 
 ---
 
-# PHẦN VI — INJECTION SCOPES (DEEP DIVE)
+# PHẦN VI — INJECTION SCOPES (CHI TIẾT)
 
 ---
 
@@ -45,7 +45,7 @@
 
 ## 11.1 Tổng quan 3 scopes
 
-NestJS hỗ trợ 3 scope levels. Scope quyết định **khi nào** instance được tạo, **bao lâu** nó tồn tại, và **bao nhiêu** instance tồn tại cùng lúc.
+NestJS hỗ trợ 3 mức scope. Scope quyết định **khi nào** instance được tạo, **bao lâu** nó tồn tại, và **bao nhiêu** instance tồn tại cùng lúc.
 
 ```typescript
 @Injectable({ scope: Scope.DEFAULT })    // Singleton — mặc định
@@ -298,7 +298,7 @@ Với 1 REQUEST-scoped provider ở cuối chain:
 
 ---
 
-# 13. Durable Providers — Giải pháp cho REQUEST scope overhead
+# 13. Durable Providers — Giải pháp cho chi phí REQUEST scope
 
 ## 13.1 Vấn đề mà Durable Providers giải quyết
 
@@ -346,17 +346,17 @@ ContextIdFactory.apply({
 })
 ```
 
-**Khi nào dùng**: Multi-tenancy applications nơi nhiều requests từ cùng tenant nên share instances. Giảm overhead đáng kể so với REQUEST scope thuần.
+**Khi nào dùng**: Ứng dụng đa tenant, nơi nhiều request từ cùng tenant nên dùng chung instance. Giảm chi phí đáng kể so với REQUEST scope thuần.
 
 ---
 
-# PHẦN VII — CIRCULAR DEPENDENCIES
+# PHẦN VII — PHỤ THUỘC VÒNG
 
 ---
 
-# 14. Circular Dependencies & forwardRef — Giải phẫu đầy đủ
+# 14. Phụ thuộc vòng & forwardRef — Giải phẫu đầy đủ
 
-## 14.1 Vấn đề: Bế tắc "con gà - quả trứng"
+## 14.1 Vấn đề: Bế tắc "con gà — quả trứng"
 
 ```typescript
 @Injectable()
@@ -473,24 +473,24 @@ Cơ chế tương tự — Scanner dùng `ctxRegistry` phát hiện circular imp
 
 ## 14.6 Khi nào forwardRef KHÔNG đủ — Dấu hiệu redesign
 
-`forwardRef` là **workaround** — nó cho phép code chạy nhưng **không fix** vấn đề thiết kế. Circular dependency là **code smell** — 2 classes có responsibilities chồng chéo.
+`forwardRef` là **giải pháp tạm** — nó cho phép code chạy nhưng **không sửa** vấn đề thiết kế. Phụ thuộc vòng là **dấu hiệu thiết kế xấu** — 2 class có trách nhiệm chồng chéo.
 
 **Giải pháp kiến trúc:**
 
-| Approach | Cách làm | Ví dụ |
+| Cách làm | Chi tiết | Ví dụ |
 |----------|----------|-------|
-| **Extract shared logic** | Tách logic cả A và B cần vào service thứ 3 (C). A và B depend on C, không depend on nhau | AuthService và UsersService cùng cần validate → tách `ValidationService` |
-| **Event-driven** | A emit event → B lắng nghe. Không compile-time dependency | AuthService emit `UserLoggedIn` → UsersService subscribe |
-| **Mediator pattern** | Tạo mediator class phối hợp A và B | `UserAuthMediator` gọi cả AuthService và UsersService |
-| **Xem lại boundaries** | Có thể A và B nên merge (nếu quá liên quan) hoặc tách khác (nếu responsibilities sai) | — |
+| **Tách logic chung** | Tách logic cả A và B cần vào service thứ 3 (C). A và B phụ thuộc C, không phụ thuộc nhau | AuthService và UsersService cùng cần validate → tách `ValidationService` |
+| **Hướng sự kiện** | A phát sự kiện → B lắng nghe. Không phụ thuộc lúc biên dịch | AuthService phát `UserLoggedIn` → UsersService lắng nghe |
+| **Mẫu Mediator** | Tạo class trung gian phối hợp A và B | `UserAuthMediator` gọi cả AuthService và UsersService |
+| **Xem lại ranh giới** | Có thể A và B nên gộp lại (nếu quá liên quan) hoặc tách khác (nếu trách nhiệm sai) | — |
 
 ---
 
-# PHẦN VIII — DYNAMIC RESOLUTION
+# PHẦN VIII — PHÂN GIẢI ĐỘNG
 
 ---
 
-# 15. Optional Dependencies — @Optional()
+# 15. Dependency tùy chọn — @Optional()
 
 ## 15.1 Vấn đề
 
@@ -598,9 +598,9 @@ Module lazy-loaded **không nằm** trong initial module graph — NestJS không
 
 **Lưu ý**: Lazy-loaded modules **không trigger** lifecycle hooks (`OnModuleInit`, `OnApplicationBootstrap`). Chỉ eager-loaded modules mới chạy hooks.
 
-## 16.2 ModuleRef — Dynamic resolution
+## 16.2 ModuleRef — Phân giải động
 
-`ModuleRef` cho phép **resolve provider tại runtime** thay vì chỉ qua constructor. Mỗi module tự động có `ModuleRef` available.
+`ModuleRef` cho phép **phân giải provider khi chạy** thay vì chỉ qua constructor. Mỗi module tự động có `ModuleRef` có sẵn.
 
 ```typescript
 @Injectable()
@@ -644,15 +644,15 @@ this.moduleRef.get(MailService)  // Lỗi nếu MailService không trong module 
 this.moduleRef.get(MailService, { strict: false })  // Tìm xuyên modules
 ```
 
-**Lưu ý quan trọng**: `ModuleRef.get()` và `resolve()` thực chất là **Service Locator pattern** — class biết container và chủ động gọi. Chỉ dùng khi **constructor injection không đủ** (ví dụ: runtime strategy selection, factory pattern). Ưu tiên constructor injection trong mọi trường hợp có thể.
+**Lưu ý quan trọng**: `ModuleRef.get()` và `resolve()` thực chất là **mẫu Service Locator** — class biết container và chủ động gọi. Chỉ dùng khi **constructor injection không đủ** (ví dụ: chọn chiến lược khi chạy, factory pattern). Ưu tiên constructor injection trong mọi trường hợp có thể.
 
 ---
 
-# PHẦN IX — LIFECYCLE & REQUEST PIPELINE
+# PHẦN IX — VÒNG ĐỜI & LUỒNG Xử LÝ REQUEST
 
 ---
 
-# 17. Lifecycle Hooks & DI — Thứ tự khởi tạo và shutdown
+# 17. Lifecycle Hooks & DI — Thứ tự khởi tạo và tắt
 
 ## 17.1 Tổng quan 5 lifecycle hooks
 
@@ -731,7 +731,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
 
 ---
 
-# 18. Module Distance & Topology Tree
+# 18. Module Distance & cây Topology
 
 ## 18.1 Module Distance là gì?
 
@@ -765,7 +765,7 @@ Khi 2 modules export **cùng token**, module **gần root hơn** (distance nhỏ
 
 ---
 
-# 19. Enhancers (Guards, Interceptors, Pipes, Filters) & DI
+# 19. Thành phần mở rộng (Enhancers) & DI
 
 ## 19.1 Enhancers tham gia DI thế nào?
 
@@ -821,7 +821,7 @@ Request arrive
     └── HttpExceptionFilter(logger) → catch()
 ```
 
-**Key insight**: Tất cả enhancers (trừ middleware Express/Fastify) đều tham gia DI system — có thể inject services, repositories, config.
+**Điểm chính**: Tất cả thành phần mở rộng (trừ middleware Express/Fastify) đều tham gia hệ thống DI — có thể inject service, repository, config.
 
 ---
 
@@ -884,20 +884,20 @@ ConfigService không trong MailModule._providers → tìm trong _imports → Con
 
 ---
 
-# 21. Common Myths — 10 hiểu lầm phổ biến
+# 21. 10 hiểu lầm phổ biến
 
 | # | Hiểu lầm | Sự thật |
 |---|-----------|---------|
-| 1 | "Provider tạo khi inject lần đầu" | Singleton tạo khi **bootstrap**, trước mọi request. Không lazy |
-| 2 | "Controller tạo trước Service" | InstanceLoader tạo **providers trước**, controllers sau — luôn luôn |
-| 3 | "`forwardRef` giải quyết mọi circular" | Chỉ workaround. Circular hầu hết là **design smell** cần redesign |
-| 4 | "`@Injectable()` sinh metadata" | `@Injectable()` là **marker**. Metadata do **TypeScript compiler** emit khi class có decorator |
-| 5 | "`@Global()` nhanh hơn explicit import" | Performance giống nhau. `@Global()` chỉ tự động available — Injector vẫn lookup qua Map |
-| 6 | "Thứ tự trong `providers[]` quan trọng" | Không. Injector dựa **dependency graph**, không phải thứ tự khai báo |
-| 7 | "Không `@Injectable()` thì không inject được" | Class không có deps trong constructor vẫn inject được. Nhưng **nên luôn dùng** |
-| 8 | "REQUEST scope chỉ ảnh hưởng 1 provider" | **Scope Bubbling** lan ngược toàn chain. 1 REQUEST Logger → cả chain tạo mới mỗi request |
-| 9 | "NestJS scan toàn bộ project files" | NestJS chỉ đọc **module tree** từ root. Provider không đăng ký = không tồn tại |
-| 10 | "`ModuleRef.get()` là DI" | Đó là **Service Locator** pattern. DI thật = constructor injection |
+| 1 | "Provider tạo khi inject lần đầu" | Singleton tạo khi **khởi động**, trước mọi request. Không tải lười |
+| 2 | "Controller tạo trước Service" | InstanceLoader tạo **provider trước**, controller sau — luôn luôn |
+| 3 | "`forwardRef` giải quyết mọi phụ thuộc vòng" | Chỉ là giải pháp tạm. Phụ thuộc vòng hầu hết là **dấu hiệu thiết kế xấu** cần tái cấu trúc |
+| 4 | "`@Injectable()` sinh metadata" | `@Injectable()` là **dấu hiệu**. Metadata do **TypeScript compiler** sinh khi class có decorator |
+| 5 | "`@Global()` nhanh hơn import tường minh" | Hiệu suất giống nhau. `@Global()` chỉ tự động có sẵn — Injector vẫn tìm qua Map |
+| 6 | "Thứ tự trong `providers[]` quan trọng" | Không. Injector dựa **đồ thị dependency**, không phải thứ tự khai báo |
+| 7 | "Không `@Injectable()` thì không inject được" | Class không có dependency trong constructor vẫn inject được. Nhưng **nên luôn dùng** |
+| 8 | "REQUEST scope chỉ ảnh hưởng 1 provider" | **Scope Bubbling** lan ngược toàn chuỗi. 1 REQUEST Logger → cả chuỗi tạo mới mỗi request |
+| 9 | "NestJS quét toàn bộ thư mục dự án" | NestJS chỉ đọc **cây module** từ gốc. Provider không đăng ký = không tồn tại |
+| 10 | "`ModuleRef.get()` là DI" | Đó là mẫu **Service Locator**. DI thật = constructor injection |
 
 ---
 
@@ -1079,7 +1079,7 @@ ConfigService không trong MailModule._providers → tìm trong _imports → Con
 
 ---
 
-## References (Part 2)
+## Tham khảo (Phần 2)
 
 | Resource | URL |
 |----------|-----|
