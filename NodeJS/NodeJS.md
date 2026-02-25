@@ -86,78 +86,316 @@
 
 ---
 
-## 2. Event Loop
+## 2. Event Loop, Libuv & Hệ Thống Hàng Đợi
 
 ### 2.1 Event Loop là gì?
 Event Loop là **trái tim** của Node.js. Nó là cơ chế cho phép Node.js thực hiện **non-blocking I/O** mặc dù JavaScript là single-threaded.
 
-### 2.2 Các phase của Event Loop
+### 2.2 Cấu trúc libuv — Bộ máy bên trong Node.js
+
+**libuv** là thư viện C, cốt lõi của Node.js, cung cấp Event Loop, Thread Pool, và Async I/O.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        LIBUV ARCHITECTURE                       │
+│                                                                 │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │                   EVENT LOOP (Main Thread)                │  │
+│  │                                                           │  │
+│  │  Vòng lặp liên tục qua 6 phases:                         │  │
+│  │                                                           │  │
+│  │   ┌──────────┐   ┌──────────┐   ┌──────────┐             │  │
+│  │   │ Timers   │──►│ Pending  │──►│  Idle/   │             │  │
+│  │   │          │   │Callbacks │   │ Prepare  │             │  │
+│  │   └──────────┘   └──────────┘   └────┬─────┘             │  │
+│  │        ▲                             │                    │  │
+│  │        │                             ▼                    │  │
+│  │   ┌──────────┐   ┌──────────┐   ┌──────────┐             │  │
+│  │   │  Close   │◄──│  Check   │◄──│   Poll   │             │  │
+│  │   │Callbacks │   │          │   │          │             │  │
+│  │   └──────────┘   └──────────┘   └──────────┘             │  │
+│  └───────────────────────────────────────────────────────────┘  │
+│                                                                 │
+│  ┌───────────────────────────┐  ┌─────────────────────────────┐ │
+│  │   THREAD POOL (4 threads) │  │   OS ASYNC I/O              │ │
+│  │                           │  │                             │ │
+│  │   • fs.readFile()         │  │   • epoll (Linux)           │ │
+│  │   • crypto.pbkdf2()       │  │   • kqueue (macOS)          │ │
+│  │   • dns.lookup()          │  │   • IOCP (Windows)          │ │
+│  │   • zlib.compress()       │  │   • TCP/UDP, DNS resolve    │ │
+│  │                           │  │                             │ │
+│  │   UV_THREADPOOL_SIZE=4    │  │   Không giới hạn threads    │ │
+│  └───────────────────────────┘  └─────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**3 thành phần chính của libuv:**
+
+| Thành phần | Vai trò | Ví dụ |
+|-----------|---------|-------|
+| **Event Loop** | Vòng lặp chạy trên main thread, điều phối callbacks qua 6 phases | Toàn bộ luồng xử lý async |
+| **Thread Pool** | 4 worker threads (mặc định), xử lý tác vụ blocking I/O | `fs.*`, `crypto.*`, `dns.lookup()`, `zlib.*` |
+| **OS Async I/O** | Dùng cơ chế non-blocking của OS cho networking | TCP/UDP sockets, `dns.resolve()`, pipes |
+
+> ⚠️ **Quan trọng:** Thread Pool chỉ dùng cho một số tác vụ cụ thể (file system, crypto, dns.lookup). Các tác vụ networking (TCP, HTTP) **KHÔNG dùng thread pool** — chúng dùng OS async I/O trực tiếp, nên Node.js handle hàng nghìn connections mà không cần hàng nghìn threads.
+
+### 2.3 Các phase của Event Loop (Macrotask Queues)
+
+Mỗi phase trong Event Loop là **một hàng đợi macrotask** do libuv quản lý:
 
 ```
    ┌───────────────────────────┐
-┌─>│         timers             │ ← setTimeout, setInterval
+┌─>│      1. TIMERS            │ ← setTimeout(), setInterval()
 │  └─────────────┬─────────────┘
 │  ┌─────────────▼─────────────┐
-│  │     pending callbacks      │ ← I/O callbacks bị trì hoãn
+│  │   2. PENDING CALLBACKS    │ ← I/O callbacks bị trì hoãn từ vòng trước
 │  └─────────────┬─────────────┘
 │  ┌─────────────▼─────────────┐
-│  │       idle, prepare        │ ← Internal (ít quan trọng)
+│  │   3. IDLE, PREPARE        │ ← Internal (Node.js dùng nội bộ)
 │  └─────────────┬─────────────┘
 │  ┌─────────────▼─────────────┐
-│  │          poll              │ ← Lấy I/O events mới, thực thi callbacks
+│  │      4. POLL              │ ← ⭐ Quan trọng nhất: lấy I/O events mới
 │  └─────────────┬─────────────┘
 │  ┌─────────────▼─────────────┐
-│  │          check             │ ← setImmediate
+│  │      5. CHECK             │ ← setImmediate()
 │  └─────────────┬─────────────┘
 │  ┌─────────────▼─────────────┐
-│  │      close callbacks       │ ← socket.on('close', ...)
+│  │   6. CLOSE CALLBACKS      │ ← socket.on('close', ...)
 └──┴───────────────────────────┘
 ```
 
-### 2.3 Microtasks vs Macrotasks
+| Phase | Chứa callback từ | Mô tả |
+|-------|------------------|-------|
+| **Timers** | `setTimeout()`, `setInterval()` | Thực thi callbacks đã đến hạn (delay ≥ threshold) |
+| **Pending Callbacks** | System errors, deferred I/O | I/O callbacks bị hoãn từ vòng trước (ít gặp) |
+| **Idle, Prepare** | Internal | Node.js dùng nội bộ, developer không cần quan tâm |
+| **Poll** | I/O events mới | ⭐ Lấy I/O events từ OS (network, file), thực thi callbacks. Nếu queue rỗng → **chờ ở đây** |
+| **Check** | `setImmediate()` | Chạy ngay sau Poll phase |
+| **Close Callbacks** | Close events | `socket.on('close')`, `server.on('close')` |
 
-| Loại           | Ví dụ                                             | Ưu tiên       |
-| -------------- | ------------------------------------------------- | -------------- |
-| **Microtask**  | `Promise.then()`, `process.nextTick()`, `queueMicrotask()` | Cao hơn        |
-| **Macrotask**  | `setTimeout`, `setInterval`, `setImmediate`, I/O  | Thấp hơn       |
+> 📌 **Cập nhật Node.js 20+ (libuv 1.45.0):** Từ libuv 1.45.0, Event Loop chạy Timers phase **chỉ sau Poll phase**, thay vì cả trước và sau như trước đây. Điều này có thể ảnh hưởng thứ tự giữa `setImmediate()` và timers trong một số edge cases.
 
-**Thứ tự ưu tiên:** `process.nextTick()` > `Promise.then()` > `setTimeout/setImmediate`
+### 2.4 Microtask Queues — KHÔNG thuộc libuv
 
-### 2.4 Ví dụ kinh điển
+Đây là điểm **cực kỳ quan trọng** mà nhiều người nhầm lẫn:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│              TOÀN BỘ HỆ THỐNG HÀNG ĐỢI NODE.JS                │
+│                                                                 │
+│  ┌───────────────────────────────────────┐  ← V8 Engine +      │
+│  │      MICROTASK QUEUES (V8/Node Core)  │     Node.js Core     │
+│  │                                       │     quản lý          │
+│  │   1. nextTick Queue                   │  ← process.nextTick()│
+│  │      (ưu tiên CAO NHẤT)              │                      │
+│  │                                       │                      │
+│  │   2. Promise Queue                    │  ← Promise.then()    │
+│  │      (ưu tiên thứ 2)                 │     catch(), finally()│
+│  │                                       │     async/await       │
+│  │                                       │     queueMicrotask() │
+│  └───────────────────────────────────────┘                      │
+│                                                                 │
+│  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─                      │
+│                                                                 │
+│  ┌───────────────────────────────────────┐  ← libuv quản lý    │
+│  │      MACROTASK QUEUES (Libuv Phases)  │                      │
+│  │                                       │                      │
+│  │   1. Timers Queue       → setTimeout  │                      │
+│  │   2. Pending Callbacks  → deferred IO │                      │
+│  │   3. Poll Queue         → I/O events  │                      │
+│  │   4. Check Queue        → setImmediate│                      │
+│  │   5. Close Queue        → close events│                      │
+│  └───────────────────────────────────────┘                      │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Tóm tắt phân chia trách nhiệm:**
+
+| | Microtask Queues | Macrotask Queues |
+|---|---|---|
+| **Ai quản lý?** | **V8 Engine + Node.js Core** | **Libuv** |
+| **Nằm trong libuv?** | ❌ **KHÔNG** | ✅ Có |
+| **Gồm những gì?** | `process.nextTick()`, `Promise.then/catch/finally`, `queueMicrotask()` | `setTimeout`, `setInterval`, `setImmediate`, I/O callbacks, close callbacks |
+| **Ưu tiên** | Luôn **cao hơn** macrotask | Thấp hơn microtask |
+
+### 2.5 Thứ tự thực thi — Thuật toán chi tiết (Node.js v11+)
+
+Đây là phần **quan trọng nhất** cần nắm:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                 THUẬT TOÁN THỰC THI                      │
+│                                                          │
+│  Bước 1:  Chạy hết code ĐỒNG BỘ (Call Stack)           │
+│           ↓                                              │
+│  Bước 2:  Quét sạch Microtask Queue:                    │
+│           → Chạy HẾT nextTick queue                     │
+│           → Chạy HẾT Promise queue                      │
+│           ↓                                              │
+│  Bước 3:  Lấy 1 callback từ Macrotask (phase hiện tại) │
+│           ↓                                              │
+│  Bước 4:  Quét sạch Microtask Queue LẦN NỮA            │
+│           → Chạy HẾT nextTick queue                     │
+│           → Chạy HẾT Promise queue                      │
+│           ↓                                              │
+│  Bước 5:  Quay lại Bước 3 (lấy macrotask tiếp theo)    │
+│           Hết macrotask trong phase → chuyển phase       │
+└─────────────────────────────────────────────────────────┘
+
+Công thức dễ nhớ:
+  Sync → All Microtasks
+  → 1 Macrotask → All Microtasks
+  → 1 Macrotask → All Microtasks
+  → ...
+```
+
+> ⚠️ **Thay đổi quan trọng ở Node.js v11+:**
+> - **Trước v11:** Node.js chạy **HẾT tất cả callbacks** trong 1 phase rồi mới quét microtask.
+> - **Từ v11+:** Node.js chạy **1 callback** → quét microtask → 1 callback → quét microtask (giống browser).
+> - Điều này ảnh hưởng thứ tự output trong một số edge cases.
+
+### 2.6 Ví dụ 1 — Cơ bản: Đoán output
 
 ```javascript
 console.log('1');                          // Sync
 
-setTimeout(() => console.log('2'), 0);     // Macrotask (timers phase)
+setTimeout(() => console.log('2'), 0);     // Macrotask (timers)
 
-setImmediate(() => console.log('3'));       // Macrotask (check phase)
+setImmediate(() => console.log('3'));       // Macrotask (check)
 
-Promise.resolve().then(() => console.log('4')); // Microtask
+Promise.resolve().then(() => console.log('4')); // Microtask (promise)
 
-process.nextTick(() => console.log('5'));   // Microtask (ưu tiên cao nhất)
+process.nextTick(() => console.log('5'));   // Microtask (nextTick)
 
 console.log('6');                          // Sync
-
-// Output: 1, 6, 5, 4, 2, 3
-// (thứ tự 2 và 3 có thể swap trong top-level context)
 ```
 
-### 2.5 Câu hỏi phỏng vấn
+**Output: `1, 6, 5, 4, 2, 3`** (2 và 3 có thể swap ở top-level context)
+
+**Giải thích từng bước:**
+1. Chạy sync: `console.log('1')` → in **1**
+2. `setTimeout` → đăng ký vào Timers queue (macrotask)
+3. `setImmediate` → đăng ký vào Check queue (macrotask)
+4. `Promise.then` → đăng ký vào Promise queue (microtask)
+5. `process.nextTick` → đăng ký vào nextTick queue (microtask)
+6. Chạy sync: `console.log('6')` → in **6**
+7. Call Stack rỗng → **Quét microtask**: nextTick trước → in **5**, Promise sau → in **4**
+8. Chuyển sang macrotask: Timers phase → `setTimeout` → in **2**
+9. Check phase → `setImmediate` → in **3**
+
+### 2.7 Ví dụ 2 — Microtask chen giữa Macrotask (Node v11+)
+
+```javascript
+setTimeout(() => {
+  console.log('timeout 1');
+  Promise.resolve().then(() => console.log('promise inside timeout'));
+}, 0);
+
+setTimeout(() => {
+  console.log('timeout 2');
+}, 0);
+```
+
+**Output (Node v11+):**
+```
+timeout 1
+promise inside timeout    ← Promise chen VÀO GIỮA 2 setTimeout!
+timeout 2
+```
+
+**Output (Node < v11):**
+```
+timeout 1
+timeout 2                 ← Chạy hết Timers phase trước
+promise inside timeout    ← Rồi mới quét microtask
+```
+
+**Giải thích (v11+):** Sau khi chạy `timeout 1` (1 macrotask), Node.js **dừng lại quét microtask** trước khi chạy `timeout 2`. Promise callback xuất hiện trong lúc chạy `timeout 1` nên nó được quét ngay.
+
+### 2.8 Ví dụ 3 — Trong I/O callback: setImmediate luôn trước setTimeout
+
+```javascript
+const fs = require('fs');
+
+fs.readFile(__filename, () => {
+  // Bên trong I/O callback (Poll phase)
+
+  setTimeout(() => console.log('setTimeout'), 0);
+  setImmediate(() => console.log('setImmediate'));
+});
+```
+
+**Output (LUÔN là):**
+```
+setImmediate
+setTimeout
+```
+
+**Tại sao?** Khi đang ở **Poll phase** (I/O callback), phase tiếp theo là **Check phase** (`setImmediate`), rồi mới quay lại **Timers phase** (`setTimeout`). Nên `setImmediate` luôn chạy trước.
+
+> 💡 **Ở top-level context** (ngoài I/O callback), thứ tự `setTimeout(fn, 0)` vs `setImmediate` **không xác định** — phụ thuộc vào tốc độ khởi tạo timer.
+
+### 2.9 Tại sao `process.nextTick()` ưu tiên hơn Promise?
+
+`process.nextTick()` nằm trong **nextTick queue** riêng, luôn được quét **trước** Promise queue. Lý do lịch sử: `process.nextTick()` có từ trước khi Promise ra đời, và Node.js giữ backward compatibility.
+
+```javascript
+Promise.resolve().then(() => console.log('Promise'));
+process.nextTick(() => console.log('nextTick'));
+// Output: nextTick, Promise    ← nextTick LUÔN trước!
+```
+
+> ⚠️ **Cảnh báo:** Đệ quy `process.nextTick()` sẽ **starve Event Loop** — I/O callbacks không bao giờ được gọi vì microtask queue không bao giờ rỗng:
+> ```javascript
+> // ❌ NGUY HIỂM: I/O bị starve
+> function loop() {
+>   process.nextTick(loop);
+> }
+> loop();
+> // → setTimeout, setImmediate, I/O callbacks... sẽ KHÔNG BAO GIỜ chạy!
+>
+> // ✅ An toàn hơn: dùng setImmediate
+> function safeLoop() {
+>   setImmediate(safeLoop); // Cho phép I/O callbacks chạy giữa các lần lặp
+> }
+> ```
+
+### 2.10 `queueMicrotask()` — API chuẩn
+
+`queueMicrotask()` là API tiêu chuẩn (Web API + Node.js), có cùng ưu tiên với `Promise.then()`:
+
+```javascript
+queueMicrotask(() => console.log('queueMicrotask'));
+Promise.resolve().then(() => console.log('Promise'));
+process.nextTick(() => console.log('nextTick'));
+
+// Output: nextTick → Promise → queueMicrotask
+// (Promise và queueMicrotask nằm cùng queue, chạy theo thứ tự đăng ký)
+```
+
+### 2.11 Câu hỏi phỏng vấn
 
 > **Q: `process.nextTick()` và `setImmediate()` khác nhau thế nào?**
 >
 > **A:**
-> - `process.nextTick()`: Thực thi **ngay sau operation hiện tại**, trước khi Event Loop tiếp tục. Thuộc **microtask queue**.
-> - `setImmediate()`: Thực thi ở **check phase** của Event Loop iteration tiếp theo. Thuộc **macrotask**.
-> - **Cẩn thận**: Dùng quá nhiều `process.nextTick()` có thể **starve Event Loop** (I/O callbacks không bao giờ được gọi).
+> - `process.nextTick()`: Thuộc **microtask queue** (V8/Node Core). Thực thi **ngay sau operation hiện tại**, trước khi Event Loop chuyển phase. Ưu tiên cao nhất.
+> - `setImmediate()`: Thuộc **macrotask** (libuv Check phase). Thực thi ở **check phase** của Event Loop.
+> - ⚠️ Dùng quá nhiều `process.nextTick()` đệ quy có thể **starve Event Loop** — I/O callbacks không bao giờ được gọi. `setImmediate()` an toàn hơn vì cho phép I/O callbacks chạy giữa các lần lặp.
+
+> **Q: Microtask queue và macrotask queue khác nhau thế nào? Ai quản lý?**
+>
+> **A:**
+> - **Microtask queues** do **V8 Engine và Node.js Core** quản lý, gồm: nextTick queue (`process.nextTick`) và Promise queue (`Promise.then`, `queueMicrotask`). **Không nằm trong libuv.**
+> - **Macrotask queues** do **libuv** quản lý, chính là các **phases** của Event Loop: Timers (`setTimeout`), Poll (I/O), Check (`setImmediate`), Close callbacks.
+> - Microtask luôn được **ưu tiên hơn**: sau mỗi macrotask, Node.js quét sạch toàn bộ microtask queue trước khi chạy macrotask tiếp theo (Node v11+).
 
 > **Q: Event Loop có thể bị block không?**
 >
 > **A:** Có! Bất kỳ synchronous operation nào chạy lâu đều block Event Loop:
 > - CPU-intensive calculations (vòng lặp nặng, mã hóa)
 > - Synchronous I/O (`fs.readFileSync`)
-> - Đệ quy vô hạn
-> → Giải pháp: Worker Threads, Child Processes, hoặc chia nhỏ tác vụ.
+> - Đệ quy vô hạn hoặc `process.nextTick()` đệ quy
+> → Giải pháp: Worker Threads, Child Processes, hoặc chia nhỏ tác vụ với `setImmediate()`.
 
 ---
 

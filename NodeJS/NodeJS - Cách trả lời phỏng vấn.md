@@ -239,6 +239,82 @@ Nêu 4-5 đặc điểm, mỗi đặc điểm:
 
 ---
 
+## Câu 8b: "Cấu trúc bên trong libuv gồm những gì? Thread Pool hoạt động ra sao?"
+
+### 🧠 Cấu trúc trả lời
+```
+1️⃣ 3 thành phần chính: Event Loop, Thread Pool, OS Async I/O
+2️⃣ Thread Pool: mục đích, số lượng, tác vụ nào dùng
+3️⃣ OS Async I/O: tác vụ nào dùng (networking)
+4️⃣ Phân biệt rõ: cái nào dùng Thread Pool, cái nào dùng OS
+5️⃣ Liên hệ: vì sao Node.js handle nhiều connections
+```
+
+### 🗣️ Bài trả lời mẫu
+
+> "Bên trong libuv gồm **3 thành phần chính**:
+>
+> **Thứ nhất, Event Loop** — chạy trên main thread, là vòng lặp liên tục đi qua 6 phases: Timers, Pending Callbacks, Idle/Prepare, Poll, Check, Close Callbacks. Mỗi phase quản lý một loại callback khác nhau. Poll phase là quan trọng nhất — nơi lấy I/O events mới từ OS.
+>
+> **Thứ hai, Thread Pool** — mặc định **4 threads**, có thể tăng qua biến môi trường `UV_THREADPOOL_SIZE`. Thread Pool chỉ dùng cho một số tác vụ cụ thể gây **blocking**: thao tác file system (`fs.readFile`, `fs.writeFile`), mã hóa (`crypto.pbkdf2`), DNS lookup (`dns.lookup`), nén (`zlib`). Khi tác vụ hoàn tất, callback được đẩy vào event queue để Event Loop xử lý.
+>
+> **Thứ ba, OS Async I/O** — dùng cơ chế **non-blocking của hệ điều hành**: `epoll` trên Linux, `kqueue` trên macOS, `IOCP` trên Windows. Tác vụ **networking** (TCP, HTTP, UDP) dùng cơ chế này — **KHÔNG dùng Thread Pool**. Đây là lý do Node.js có thể handle hàng nghìn TCP connections mà không cần hàng nghìn threads.
+>
+> **Điểm quan trọng cần phân biệt**: Đọc file → Thread Pool. Nhận HTTP request → OS Async I/O. `dns.lookup()` → Thread Pool. `dns.resolve()` → OS Async I/O. Hiểu rõ cái nào dùng gì giúp predict performance bottleneck."
+
+### ✅ Mẹo ghi điểm
+- Phân biệt **Thread Pool vs OS Async I/O** → chi tiết mà ít người biết
+- Nêu `UV_THREADPOOL_SIZE` → cho thấy hiểu configuration
+- Nhắc đến `epoll/kqueue/IOCP` → hiểu cross-platform internals
+
+---
+
+## Câu 8c: "Node.js có Microtask Queue và Macrotask Queue không? Chúng khác nhau thế nào?"
+
+### 🧠 Cấu trúc trả lời
+```
+1️⃣ Có — Node.js có cả 2 loại queue
+2️⃣ Ai quản lý: Microtask = V8/Node Core, Macrotask = libuv
+3️⃣ Microtask gồm gì: nextTick queue + Promise queue
+4️⃣ Macrotask gồm gì: 6 phases = 6 queues
+5️⃣ Thứ tự thực thi: 1 macro → quét sạch micro → 1 macro → ...
+6️⃣ Thay đổi quan trọng ở Node v11+
+```
+
+### 🗣️ Bài trả lời mẫu
+
+> "Đúng rồi, Node.js có cả **Microtask Queue** và **Macrotask Queue**, nhưng chúng do **hai hệ thống khác nhau** quản lý.
+>
+> **Microtask Queue** — do **V8 Engine và Node.js Core** quản lý, **KHÔNG nằm trong libuv**. Nó gồm 2 hàng đợi nhỏ:
+> - **nextTick Queue**: chứa callbacks từ `process.nextTick()` — ưu tiên **cao nhất**
+> - **Promise Queue**: chứa callbacks từ `Promise.then()`, `catch()`, `finally()`, `async/await`, và `queueMicrotask()`
+>
+> **Macrotask Queue** — do **libuv** quản lý, chính là **các phases** của Event Loop:
+> - **Timers**: `setTimeout`, `setInterval`
+> - **Poll**: I/O callbacks (đọc file xong, nhận data từ network)
+> - **Check**: `setImmediate`
+> - **Close Callbacks**: `socket.on('close')`
+>
+> **Thứ tự thực thi** — đây là phần quan trọng nhất: Từ **Node.js v11+**, cơ chế hoạt động là:
+> 1. Chạy hết code **đồng bộ** (Call Stack)
+> 2. **Quét sạch** toàn bộ Microtask Queue — nextTick trước, Promise sau
+> 3. Lấy **1 callback** từ Macrotask (phase hiện tại của libuv)
+> 4. **Quét sạch** Microtask Queue lần nữa
+> 5. Lấy **1 macrotask** tiếp theo → quét microtask → lặp lại
+>
+> Công thức dễ nhớ: **Sync → All Micro → 1 Macro → All Micro → 1 Macro → ...**
+>
+> **Trước v11**, Node.js chạy **hết tất cả callbacks trong 1 phase** rồi mới quét microtask — khác biệt đáng kể trong một số edge cases.
+>
+> Tóm lại: **libuv lo giao tiếp với hệ điều hành (Macrotasks), còn V8/Node Core lo ưu tiên xử lý nhanh (Microtasks)**."
+
+### ✅ Mẹo ghi điểm
+- Phân biệt rõ **ai quản lý gì** (V8 vs libuv) → rất ít ứng viên nói được
+- Giải thích thay đổi **Node v11+** → cho thấy hiểu lịch sử phát triển
+- Đưa **công thức dễ nhớ** → thể hiện khả năng truyền đạt
+
+---
+
 ## Câu 9: "Sự khác biệt giữa Node.js và JavaScript trong trình duyệt?"
 
 ### 🗣️ Bài trả lời mẫu
