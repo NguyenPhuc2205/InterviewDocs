@@ -84,6 +84,81 @@
 > - **Node.js**: 1 thread xử lý tất cả requests nhờ non-blocking I/O → xử lý hàng nghìn concurrent connections với ít tài nguyên hơn.
 > - **Trade-off**: Node.js **không phù hợp** cho CPU-intensive tasks (mã hóa video, tính toán nặng) vì sẽ **block Event Loop**.
 
+### 1.5 Node.js Bindings — Cầu nối JS ↔ C++
+
+Bindings là thành phần **thường bị bỏ qua** nhưng **cực kỳ quan trọng** trong kiến trúc Node.js:
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                     NODE.JS RUNTIME                          │
+│                                                              │
+│  Layer 1: JavaScript Code                                    │
+│           → Code bạn viết: fs.readFile(), http.get()...      │
+│                              │                               │
+│  Layer 2: Node.js Core APIs (JS)                             │
+│           → Module fs, http, crypto... viết bằng JS/TS       │
+│           → Nằm trong thư mục lib/ của Node.js source        │
+│                              │                               │
+│  Layer 3: Node.js Bindings (C++)         ← CHÍNH LÀ ĐÂY     │
+│           → Nằm trong thư mục src/*.cc                       │
+│           → Dùng V8 C++ API / Node-API (N-API)               │
+│           → Chuyển đổi kiểu dữ liệu JS ↔ C++               │
+│                     ┌────────┴────────┐                      │
+│  Layer 4a: V8       │   Layer 4b: libuv                      │
+│  (Chạy JS code,     │   (Event Loop,                         │
+│   heap, GC)          │   Thread Pool, Async I/O)              │
+└──────────────────────┴───────────────────────────────────────┘
+```
+
+**Bindings làm gì cụ thể?**
+
+Khi bạn gọi `fs.readFile('file.txt', callback)` trong JavaScript — JavaScript **không thể trực tiếp** gọi OS để đọc file. Bindings thực hiện 2 việc:
+
+1. **Type Marshalling** — Chuyển đổi kiểu dữ liệu giữa 2 thế giới:
+   - JS `string` → C++ `std::string`
+   - JS `Buffer` → C++ `char*`
+   - JS `callback function` → V8 `v8::Function` handle
+
+2. **Function Bridging** — Kết nối function call từ JS sang C++:
+   - JS gọi `fs.readFile()` → Binding nhận qua V8 API
+   - Binding gọi `libuv` function tương ứng (`uv_fs_read`)
+   - Khi libuv xong → Binding chuyển kết quả ngược lại thành JS value
+   - Callback được đưa vào Event Loop queue
+
+**Ví dụ luồng `fs.readFile()`:**
+
+```
+JS: fs.readFile('file.txt', callback)
+ │
+ ▼
+Node.js Core (lib/fs.js):
+ → Validate arguments, wrap callback
+ │
+ ▼
+Bindings (src/node_file.cc):
+ → Nhận v8::String → chuyển thành C-string
+ → Gọi uv_fs_read() (libuv API)
+ │
+ ▼
+libuv:
+ → Đẩy task vào Thread Pool (1 trong 4 threads)
+ → Thread đọc file từ OS
+ → Khi xong → đưa callback vào Poll queue
+ │
+ ▼
+Event Loop (Poll phase):
+ → Lấy callback ra → Bindings chuyển C++ result → JS Buffer
+ → Gọi callback(null, data) trong JS
+```
+
+> 💡 **Node-API (N-API):** Từ Node.js v8+, Node-API cung cấp **ABI-stable** layer — add-on C++ compile 1 lần, chạy trên nhiều Node.js versions mà không cần recompile. Đây là cách khuyến khích để viết native add-ons.
+
+### 1.6 Câu hỏi phỏng vấn — Bindings
+
+> **Q: Giải thích luồng xử lý khi gọi `fs.readFile()` trong Node.js?**
+>
+> **A:** Khi gọi `fs.readFile()`, request đi qua 4 layers: (1) JS code gọi module `fs` → (2) Module `fs` (viết bằng JS, nằm trong `lib/fs.js`) validate arguments → (3) **Bindings** (C++, nằm trong `src/node_file.cc`) chuyển đổi JS types sang C++ types và gọi libuv → (4) **libuv** đẩy task đọc file vào Thread Pool. Khi file đọc xong, libuv đưa callback vào Event Loop (Poll phase), Bindings chuyển C++ result ngược lại thành JS value, rồi callback được gọi.
+
 ---
 
 ## 2. Event Loop, Libuv & Hệ Thống Hàng Đợi
@@ -138,6 +213,50 @@ Event Loop là **trái tim** của Node.js. Nó là cơ chế cho phép Node.js 
 | **OS Async I/O** | Dùng cơ chế non-blocking của OS cho networking | TCP/UDP sockets, `dns.resolve()`, pipes |
 
 > ⚠️ **Quan trọng:** Thread Pool chỉ dùng cho một số tác vụ cụ thể (file system, crypto, dns.lookup). Các tác vụ networking (TCP, HTTP) **KHÔNG dùng thread pool** — chúng dùng OS async I/O trực tiếp, nên Node.js handle hàng nghìn connections mà không cần hàng nghìn threads.
+
+### 2.2.1 Toàn bộ Runtime — Queue nằm ở đâu?
+
+Đây là bức tranh **đầy đủ** về toàn bộ hệ thống queue trong Node.js runtime:
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                     NODE.JS RUNTIME                          │
+│                                                              │
+│  ┌─────────────┐                                             │
+│  │  Call Stack  │  ← V8 chạy JS synchronous ở đây            │
+│  └──────┬──────┘                                             │
+│         │ (khi Call Stack rỗng)                               │
+│         ▼                                                    │
+│  ┌─────────────────────────────────────────────────────┐     │
+│  │ [1] nextTick Queue                                  │     │
+│  │     → process.nextTick()                            │     │
+│  │     → Quản lý bởi: NODE.JS CORE (không phải libuv)  │     │
+│  │     → Ưu tiên: CAO NHẤT                            │     │
+│  └────────────────────┬────────────────────────────────┘     │
+│                       ▼                                      │
+│  ┌─────────────────────────────────────────────────────┐     │
+│  │ [2] Microtask Queue                                 │     │
+│  │     → Promise.then(), async/await, queueMicrotask() │     │
+│  │     → Quản lý bởi: V8 ENGINE                       │     │
+│  │     → Ưu tiên: cao (sau nextTick)                   │     │
+│  └────────────────────┬────────────────────────────────┘     │
+│                       ▼                                      │
+│  ┌─────────────────────────────────────────────────────┐     │
+│  │ [3-8] 6 Phase Queues (KHÔNG gọi là "Macrotask")     │     │
+│  │     → Timers / Pending / Idle / Poll / Check / Close│     │
+│  │     → Quản lý bởi: LIBUV                           │     │
+│  │     → Ưu tiên: thấp nhất, chạy sau microtask       │     │
+│  └─────────────────────────────────────────────────────┘     │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐    │
+│  │              libuv Event Loop                        │    │
+│  │    Điều phối: lấy callback từ phases, xen kẽ với     │    │
+│  │    việc quét sạch microtask queues ở trên            │    │
+│  └──────────────────────────────────────────────────────┘    │
+└──────────────────────────────────────────────────────────────┘
+```
+
+> ⚠️ **Điểm quan trọng:** Node.js **KHÔNG có "Macrotask Queue"** theo đúng nghĩa như browser. Thuật ngữ "macrotask" là khái niệm từ HTML spec (browser). Trong Node.js, thay vào đó là **6 phase queues riêng biệt**, mỗi phase có queue của nó. Nhiều tài liệu dùng chung thuật ngữ "macrotask" cho dễ hiểu khi so sánh với browser — nhưng về mặt kỹ thuật chính xác thì Node.js không sử dụng tên đó.
 
 ### 2.3 Các phase của Event Loop (Macrotask Queues)
 
@@ -312,6 +431,13 @@ promise inside timeout    ← Rồi mới quét microtask
 
 **Giải thích (v11+):** Sau khi chạy `timeout 1` (1 macrotask), Node.js **dừng lại quét microtask** trước khi chạy `timeout 2`. Promise callback xuất hiện trong lúc chạy `timeout 1` nên nó được quét ngay.
 
+> 💡 **Tại sao Node.js v11 thay đổi?** Trước v11, Node.js chạy **hết tất cả callbacks trong 1 phase** rồi mới quét microtask → khác với browser (browser quét microtask sau MỖI macrotask). Đây là breaking change lớn — mục đích để **đồng nhất behavior** giữa Node.js và browser, giúp code chạy consistent trên cả 2 môi trường.
+>
+> | Version | Behavior |
+> |---------|----------|
+> | **Node < v11** | Chạy hết phase → quét microtask → phase tiếp |
+> | **Node ≥ v11** | Chạy 1 callback → quét microtask → callback tiếp |
+
 ### 2.8 Ví dụ 3 — Trong I/O callback: setImmediate luôn trước setTimeout
 
 ```javascript
@@ -334,6 +460,18 @@ setTimeout
 **Tại sao?** Khi đang ở **Poll phase** (I/O callback), phase tiếp theo là **Check phase** (`setImmediate`), rồi mới quay lại **Timers phase** (`setTimeout`). Nên `setImmediate` luôn chạy trước.
 
 > 💡 **Ở top-level context** (ngoài I/O callback), thứ tự `setTimeout(fn, 0)` vs `setImmediate` **không xác định** — phụ thuộc vào tốc độ khởi tạo timer.
+>
+> **Tại sao non-deterministic?** Đây là giải thích kỹ thuật:
+>
+> 1. `setTimeout(fn, 0)` trong Node.js **thực tế là 1ms minimum** (Node.js tự động chuyển `0` thành `1`)
+> 2. Trước khi Event Loop bắt đầu iteration đầu tiên, libuv gọi `clock_gettime()` (system call) để lấy current time
+> 3. Thời gian của system call này **không cố định** — phụ thuộc vào tải hệ thống, các process khác đang chạy
+> 4. **Nếu** `clock_gettime()` + initialization mất > 1ms → timer đã expire → Timers phase chạy trước → **`setTimeout` trước**
+> 5. **Nếu** quá trình đó mất < 1ms → timer chưa expire → Poll → Check → **`setImmediate` trước**
+>
+> Tóm lại: phụ thuộc vào cuộc đua giữa **1ms timer** và **tốc độ khởi tạo process**.
+>
+> (Nguồn: [Node.js Official Docs — setImmediate vs setTimeout](https://nodejs.org/en/learn/asynchronous-work/understanding-setimmediate))
 
 ### 2.9 Tại sao `process.nextTick()` ưu tiên hơn Promise?
 
@@ -396,6 +534,89 @@ process.nextTick(() => console.log('nextTick'));
 > - Synchronous I/O (`fs.readFileSync`)
 > - Đệ quy vô hạn hoặc `process.nextTick()` đệ quy
 > → Giải pháp: Worker Threads, Child Processes, hoặc chia nhỏ tác vụ với `setImmediate()`.
+
+### 2.12 So sánh Event Loop: Browser vs Node.js
+
+Đây là câu hỏi phỏng vấn **rất phổ biến** — cần phân biệt rõ vì implementation rất khác nhau:
+
+**Browser Event Loop:**
+```
+┌─────────────────────────────────────────────────┐
+│              BROWSER RUNTIME                     │
+│                                                  │
+│  Call Stack (JS Engine, V8/SpiderMonkey)          │
+│       │                                          │
+│       ▼ (khi Call Stack rỗng)                    │
+│  ┌───────────────────────┐                       │
+│  │ 1. Microtask Queue    │ ← Promise.then(),     │
+│  │    (quét sạch hết)    │   MutationObserver     │
+│  └───────────┬───────────┘                       │
+│              ▼                                   │
+│  ┌───────────────────────┐                       │
+│  │ 2. requestAnimation   │ ← Animation callbacks │
+│  │    Frame (rAF)        │   (~60fps, 16ms)       │
+│  └───────────┬───────────┘                       │
+│              ▼                                   │
+│  ┌───────────────────────┐                       │
+│  │ 3. Render             │ ← Style → Layout →    │
+│  │    (nếu cần)          │   Paint → Composite    │
+│  └───────────┬───────────┘                       │
+│              ▼                                   │
+│  ┌───────────────────────┐                       │
+│  │ 4. Macrotask Queue    │ ← setTimeout,          │
+│  │    (lấy 1 task)       │   click events, I/O    │
+│  └───────────┘───────────┘                       │
+│       │                                          │
+│       └── quay lại bước 1 ──────────────────────→│
+└─────────────────────────────────────────────────┘
+```
+
+**Node.js Event Loop:**
+```
+┌──────────────────────────────────────────────────┐
+│              NODE.JS RUNTIME                      │
+│                                                   │
+│  Call Stack (V8)                                  │
+│       │                                           │
+│       ▼ (khi Call Stack rỗng)                     │
+│  ┌────────────────────────┐                       │
+│  │ nextTick + Microtask   │ ← process.nextTick(), │
+│  │ (quét sạch sau MỖI    │   Promise.then()       │
+│  │  callback — v11+)      │                       │
+│  └────────────┬───────────┘                       │
+│               ▼                                   │
+│  ┌────────────────────────┐                       │
+│  │ 6 Phase Queues (libuv) │ ← Timers → Pending →  │
+│  │ Chạy tuần tự, lặp lại  │  Idle → Poll → Check  │
+│  │                        │  → Close               │
+│  └────────────────────────┘                       │
+│  KHÔNG CÓ Render step (không có UI)               │
+│  KHÔNG CÓ requestAnimationFrame                   │
+└──────────────────────────────────────────────────┘
+```
+
+**Bảng so sánh chi tiết:**
+
+| Tiêu chí | Browser | Node.js |
+|----------|---------|----------|
+| **Mục tiêu** | UI mượt mà (60fps) | I/O throughput cao |
+| **Thư viện** | Browser engine built-in | **libuv** (C library) |
+| **Cấu trúc queue** | 1 Macrotask Queue + 1 Microtask Queue | **6 Phase Queues** + nextTick + Microtask |
+| **Render step** | ✅ Có (Style → Layout → Paint) | ❌ Không có (không có UI) |
+| **requestAnimationFrame** | ✅ Có (~60fps) | ❌ Không có |
+| **process.nextTick()** | ❌ Không có | ✅ Ưu tiên cao nhất trước cả Promise |
+| **setImmediate()** | ❌ Không có (deprecated) | ✅ Chạy ở Check phase |
+| **MutationObserver** | ✅ Microtask | ❌ Không có (không có DOM) |
+| **setTimeout minimum** | 4ms (sau 5 lần nested) | 1ms |
+| **Microtask timing** | Sau MỖI macrotask + trước render | Sau MỖI callback (v11+), giữa các phases |
+| **Blocking** | Freeze UI, jank | Server không phản hồi requests |
+| **Thread Pool** | Web Workers (manual) | libuv Thread Pool (4 threads, tự động) |
+
+> 💡 **Điểm giống nhau quan trọng:** Cả hai đều là **single-threaded** cho JS execution, đều quét **microtask trước macrotask**, và từ Node.js v11+ thì timing microtask đã **gần giống nhau** (sau mỗi callback).
+
+> ⚠️ Một điểm hay bị nhầm: Browser có **minimum delay 4ms** cho `setTimeout` khi nested >= 5 levels (HTML Spec §8.6). Node.js chỉ có **minimum 1ms** (libuv tự động chuyển `0` → `1`). Đây là lý do performance characteristics khác nhau.
+
+> **Interview one-liner:** _"Browser Event Loop optimizes for UI rendering — có render step và rAF. Node.js Event Loop optimizes for I/O — có 6 phases riêng biệt do libuv quản lý, không có render step, và có thêm process.nextTick() với ưu tiên cao nhất."_
 
 ---
 

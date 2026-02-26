@@ -382,6 +382,45 @@ Nêu 4-5 đặc điểm, mỗi đặc điểm:
 
 ---
 
+## Câu 11b: "So sánh Event Loop trong Browser và Node.js"
+
+### 🧠 Cấu trúc trả lời
+```
+1️⃣ Concept giống nhau: single-threaded, microtask trước macrotask
+2️⃣ Mục tiêu khác nhau: UI rendering vs I/O throughput
+3️⃣ Cấu trúc queue khác nhau
+4️⃣ Các API unique mỗi bên
+5️⃣ Kết luận rõ ràng
+```
+
+### 🗣️ Bài trả lời mẫu
+
+> "**Concept giống nhau** — Cả browser và Node.js đều chạy JavaScript single-threaded, đều có Call Stack, đều quét **microtask trước macrotask**, và đều dùng event loop để xử lý bất đồng bộ.
+>
+> Nhưng **implementation thì khác nhau hoàn toàn** vì mục tiêu khác:
+>
+> **Browser** tối ưu cho **UI rendering** — mục tiêu là 60fps mượt mà. Event loop đơn giản hơn: lấy 1 macrotask → quét sạch microtask → **requestAnimationFrame** → **Render** (Style → Layout → Paint) → lặp lại. Bước **render** là điểm khác biệt lớn nhất — Node.js không có bước này vì không có UI.
+>
+> **Node.js** tối ưu cho **I/O throughput** — mục tiêu là handle nhiều concurrent connections. Event loop phức tạp hơn do **libuv** quản lý, chia thành **6 phases riêng biệt**: Timers → Pending → Idle/Prepare → **Poll** (phase quan trọng nhất) → Check → Close. Node.js **không có render step**, không có `requestAnimationFrame`.
+>
+> **Một số khác biệt cụ thể:**
+>
+> - **Microtask timing**: Từ Node.js v11+, microtask được quét sau **mỗi callback** (giống browser). Trước v11, quét sau mỗi **phase** — đây là breaking change lớn.
+> - **`process.nextTick()`**: Chỉ có trong Node.js, ưu tiên cao nhất, thậm chí trước Promise. Browser không có.
+> - **`setImmediate()`**: Chỉ có trong Node.js (Check phase). Browser đã deprecated.
+> - **`setTimeout` minimum delay**: Browser có minimum **4ms** khi nested ≥ 5 lần (HTML Spec). Node.js chỉ **1ms**.
+> - **`MutationObserver`**: Chỉ có trong browser (microtask, theo dõi DOM changes). Node.js không có DOM.
+>
+> **Tóm lại**: Browser Event Loop ưu tiên **rendering**, Node.js Event Loop ưu tiên **I/O** — cùng concept nhưng khác implementation."
+
+### ✅ Mẹo ghi điểm
+- Nói **cùng concept, khác implementation** — thể hiện hiểu sâu
+- Nhắc đến **render step** là điểm khác biệt lớn nhất — nhiều ứng viên quên
+- Nhắc Node.js v11+ change → thể hiện biết chi tiết version history
+- Nhắc `setTimeout` 4ms vs 1ms → rất ít người biết, gây ấn tượng mạnh
+
+---
+
 ## Câu 12: "Cho đoạn code sau, output là gì? Giải thích."
 
 ```javascript

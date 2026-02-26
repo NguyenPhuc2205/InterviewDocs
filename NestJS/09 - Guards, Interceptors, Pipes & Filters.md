@@ -230,6 +230,119 @@ export class CacheInterceptor implements NestInterceptor {
 }
 ```
 
+## 3.1 RxJS Operators trong Interceptor
+
+Interceptor dùng **RxJS Observable** — `next.handle()` trả về Observable chứa response data. Bạn dùng `.pipe()` với các operators để xử lý:
+
+### Bảng các operators thường dùng
+
+| Operator | Import | Mục đích | Thay đổi data? |
+|----------|--------|----------|---------|
+| **`tap`** | `rxjs/operators` | Side-effect (logging, cache), **KHÔNG thay đổi** data | ❌ Không |
+| **`map`** | `rxjs/operators` | **Biến đổi** data trước khi trả về client | ✅ Có |
+| **`catchError`** | `rxjs/operators` | Bắt lỗi từ handler, trả error khác hoặc fallback | ✅ Có (error) |
+| **`timeout`** | `rxjs/operators` | Giới hạn thời gian xử lý, ném `TimeoutError` nếu quá hạn | ❌ Không |
+| **`switchMap`** | `rxjs/operators` | Chuyển sang Observable khác (ít dùng trong NestJS) | ✅ Có |
+| **`of`** | `rxjs` | Tạo Observable từ giá trị — dùng khi trả cache, mock | ✅ Có |
+
+### `tap` — Side-effect, KHÔNG thay đổi data
+
+```typescript
+// tap: "nhìn" data nhưng KHÔNG THAY ĐỔI nó
+// Dùng cho: logging, lưu cache, ghi metrics
+return next.handle().pipe(
+  tap({
+    next: (data) => {
+      // data ở đây là response từ handler
+      console.log('Response data:', data)    // Chỉ log, KHÔNG sửa
+      this.cacheService.set(key, data, 60)  // Lưu cache, KHÔNG sửa
+    },
+    error: (err) => {
+      console.error('Handler error:', err)   // Log lỗi
+    },
+  }),
+)
+// Client nhận ĐÚNG data gốc từ handler, không bị thay đổi
+```
+
+### `map` — Biến đổi data
+
+```typescript
+// map: THAY ĐỔI data trước khi trả về client
+// Dùng cho: wrap response, xóa field nhạy cảm, format data
+return next.handle().pipe(
+  map(data => ({
+    success: true,
+    data,                              // Wrap vào object mới
+    timestamp: new Date().toISOString(),
+  })),
+)
+// Handler trả: { name: "Phuc" }
+// Client nhận: { success: true, data: { name: "Phuc" }, timestamp: "..." }
+```
+
+### `catchError` — Bắt lỗi và xử lý
+
+```typescript
+import { catchError } from 'rxjs/operators'
+import { throwError } from 'rxjs'
+
+// catchError: bắt lỗi từ handler, biến đổi hoặc thay thế
+return next.handle().pipe(
+  catchError(err => {
+    // Log lỗi chi tiết (side-effect)
+    this.logger.error(`[${request.method}] ${request.url}`, err.stack)
+
+    // Có thể trả lỗi mới
+    return throwError(() => new InternalServerErrorException('Lỗi hệ thống'))
+
+    // Hoặc trả fallback data
+    // return of({ data: null, error: 'Service unavailable' })
+  }),
+)
+```
+
+### `timeout` — Giới hạn thời gian
+
+```typescript
+import { timeout, catchError } from 'rxjs/operators'
+import { TimeoutError, throwError } from 'rxjs'
+
+@Injectable()
+export class TimeoutInterceptor implements NestInterceptor {
+  intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
+    return next.handle().pipe(
+      timeout(5000),  // 5 giây — ném TimeoutError nếu quá hạn
+      catchError(err => {
+        if (err instanceof TimeoutError) {
+          return throwError(() =>
+            new RequestTimeoutException('Request xử lý quá lâu')
+          )
+        }
+        return throwError(() => err)
+      }),
+    )
+  }
+}
+```
+
+### Kết hợp nhiều operators
+
+```typescript
+// Thực tế: thường kết hợp nhiều operators trong 1 pipe
+return next.handle().pipe(
+  timeout(5000),                               // 1. Giới hạn 5s
+  tap(data => this.logger.log('Success', data)), // 2. Log (side-effect)
+  map(data => ({ success: true, data })),        // 3. Wrap response
+  catchError(err => {                            // 4. Bắt lỗi
+    this.logger.error('Error', err)
+    return throwError(() => err)
+  }),
+)
+```
+
+> ⚠️ **Nhớ**: `tap` = **nhìn nhưng không sờ** (side-effect). `map` = **biến đổi** (transform). Đây là điểm khác biệt quan trọng nhất — hay bị hỏi phỏng vấn.
+
 ## Sử dụng Interceptor
 
 ```typescript
@@ -250,6 +363,23 @@ export class UserController { /* ... */ }
   ],
 })
 export class AppModule {}
+```
+
+## Thứ tự khi dùng nhiều Interceptors
+
+```typescript
+// Interceptors chạy theo thứ tự khai báo (TRƯỚC handler)
+// và NGƯỢC thứ tự (SAU handler) — giống stack LIFO
+
+@UseInterceptors(A, B, C)
+findAll() { /* ... */ }
+
+// TRƯỚC handler: A.before → B.before → C.before
+// Handler chạy
+// SAU handler:  C.after  → B.after  → A.after
+//
+// Giống try-catch nesting:
+// A { B { C { handler } C } B } A
 ```
 
 ---
@@ -461,26 +591,108 @@ export class AppModule {}
 
 # 6. So sánh
 
-## Bảng so sánh chi tiết
+## 6.1 Bảng so sánh 4 Enhancers
 
 | | Guard | Interceptor | Pipe | Filter |
 |-|-------|-------------|------|--------|
 | **Interface** | `CanActivate` | `NestInterceptor` | `PipeTransform` | `ExceptionFilter` |
 | **Mục đích** | Cho phép / chặn | Biến đổi req/res | Validate / transform | Xử lý lỗi |
 | **Khi nào chạy** | Trước interceptor | Bọc quanh handler | Trước handler | Khi có exception |
+| **Return type** | `boolean` / `Promise<boolean>` | `Observable<any>` | Giá trị đã transform | `void` |
 | **Có DI?** | ✅ | ✅ | ✅ | ✅ |
-| **Có ExecutionContext?** | ✅ | ✅ | ❌ | ✅ (ArgumentsHost) |
+| **Có ExecutionContext?** | ✅ | ✅ `CallHandler` | ❌ Chỉ có `ArgumentMetadata` | ✅ `ArgumentsHost` |
+| **Chạy trước handler?** | ✅ | ✅ (before) | ✅ | ❌ Chỉ khi có lỗi |
+| **Chạy sau handler?** | ❌ | ✅ (after, qua RxJS) | ❌ | ❌ |
+| **Có thể skip handler?** | ✅ (return false) | ✅ (return `of(cached)`) | ❌ (chỉ throw) | ❌ |
 | **Global token** | `APP_GUARD` | `APP_INTERCEPTOR` | `APP_PIPE` | `APP_FILTER` |
 | **Decorator** | `@UseGuards()` | `@UseInterceptors()` | `@UsePipes()` | `@UseFilters()` |
 
-## Khi nào dùng cái nào?
+## 6.2 Middleware vs Guard vs Interceptor — So sánh chi tiết
+
+Đây là 3 thứ **dễ nhầm nhất** khi phỏng vấn:
+
+| Tiêu chí | Middleware | Guard | Interceptor |
+|----------|-----------|-------|---------|
+| **Biết handler đích?** | ❌ Không | ✅ Có (`ExecutionContext`) | ✅ Có (`ExecutionContext`) |
+| **Đọc metadata?** | ❌ Không | ✅ Có (`Reflector`) | ✅ Có (`Reflector`) |
+| **Thay đổi response?** | ❌ Chỉ req | ❌ Chỉ cho phép/chặn | ✅ Có (qua RxJS `map`) |
+| **Chạy code sau handler?** | ❌ | ❌ | ✅ Có (qua RxJS `tap`, `map`) |
+| **Dùng RxJS?** | ❌ | ❌ | ✅ Bắt buộc |
+| **NestJS-specific?** | ❌ (giống Express) | ✅ | ✅ |
+| **Có thể dùng DI?** | ✅ (functional: ❌) | ✅ | ✅ |
+| **Use case chính** | CORS, body parsing, logging đơn giản | Auth, RBAC, rate limiting | Response transform, timing, cache |
+
+> 💡 **Quy tắc ngón tay cái:**
+> - Cần **req/res/next** đơn giản, không cần biết handler → **Middleware**
+> - Cần **quyết định cho phép hay chặn** dựa trên metadata → **Guard**
+> - Cần **biến đổi response** hoặc **chạy logic sau handler** → **Interceptor**
+
+## 6.3 Guard vs Pipe — Khi nào dùng gì?
+
+| Scenario | Dùng gì | Lý do |
+|----------|---------|-------|
+| Kiểm tra JWT token hợp lệ | **Guard** | Đây là authorization, không phải data validation |
+| Kiểm tra body DTO hợp lệ | **Pipe** | Đây là input validation |
+| Kiểm tra user có role admin | **Guard** | Role-based access control |
+| Chuyển `"123"` → `123` | **Pipe** | Data transformation |
+| Kiểm tra user sở hữu resource | **Guard** | Business authorization |
+| Validate email format | **Pipe** | Input validation |
+
+## 6.4 Flowchart quyết định
 
 ```
-"Request có được phép không?"          → Guard
-"Cần biến đổi response format?"       → Interceptor
-"Cần validate/transform dữ liệu?"     → Pipe
-"Cần format lỗi tùy chỉnh?"           → Exception Filter
-"Cần xử lý chung (CORS, logging)?"    → Middleware
+Bạn cần xử lý gì?
+│
+├─ "Request có được phép không?"           → Guard
+│    └─ Dựa trên token, role, permission
+│
+├─ "Dữ liệu đầu vào hợp lệ không?"       → Pipe
+│    └─ Validate DTO, transform types
+│
+├─ "Cần thay đổi response format?"         → Interceptor (map)
+│    └─ Wrap data, remove sensitive fields
+│
+├─ "Cần side-effect (log, cache)?"         → Interceptor (tap)
+│    └─ Logging thời gian, lưu cache
+│
+├─ "Cần format lỗi riêng?"                → Exception Filter
+│    └─ Custom error response format
+│
+└─ "Cần xử lý chung cho mọi request?"     → Middleware
+     └─ CORS, body parsing, helmet
+```
+
+## 6.5 Ví dụ thực tế — Kết hợp tất cả
+
+```typescript
+@Controller('orders')
+@UseGuards(AuthGuard, RolesGuard)          // 1. Auth + Role check
+@UseInterceptors(TransformInterceptor)     // 4. Wrap response
+export class OrderController {
+
+  @Post()
+  @Roles('customer')                       // Metadata cho RolesGuard
+  @UseInterceptors(LoggingInterceptor)     // 3. Log timing
+  @UseFilters(HttpExceptionFilter)         // 5. Format error
+  create(
+    @Body(new ZodValidationPipe(CreateOrderSchema))  // 2. Validate input
+    dto: CreateOrderDto,
+  ) {
+    return this.orderService.create(dto)   // Handler
+  }
+}
+
+// Luồng thực thi:
+// Request → AuthGuard (token?) → RolesGuard (role customer?)
+//         → LoggingInterceptor.before (start timer)
+//         → TransformInterceptor.before
+//         → ZodValidationPipe (validate body)
+//         → Handler (create order)
+//         → TransformInterceptor.after (wrap { success, data })
+//         → LoggingInterceptor.after (log "POST /orders - 45ms")
+//         → Response to client
+//
+// Nếu lỗi ở bất kỳ bước nào → HttpExceptionFilter bắt
 ```
 
 ---
@@ -489,15 +701,15 @@ export class AppModule {}
 
 ## Câu 1: Thứ tự thực thi của các enhancers?
 
-**Trả lời**: "Middleware → Guards → Interceptors (trước) → Pipes → Handler → Interceptors (sau). Exception Filter bắt lỗi ở bất kỳ bước nào."
+**Trả lời**: "Middleware → Guards → Interceptors (trước) → Pipes → Handler → Interceptors (sau). Exception Filter bắt lỗi ở bất kỳ bước nào. Nếu có nhiều cùng loại, chạy theo thứ tự khai báo — trừ interceptor SAU handler thì chạy **ngược** (LIFO)."
 
 ## Câu 2: Guard khác Middleware thế nào?
 
-**Trả lời**: "Guard có `ExecutionContext` — biết request đang đi đến handler nào, đọc được metadata (roles, permissions). Middleware không biết handler, chỉ biết req/res/next. Dùng guard khi cần kiểm tra quyền dựa trên route metadata."
+**Trả lời**: "Guard có `ExecutionContext` — biết request đang đi đến handler nào, đọc được metadata (roles, permissions) bằng `Reflector`. Middleware không biết handler, chỉ biết req/res/next giống Express. Dùng guard khi cần kiểm tra quyền dựa trên route metadata."
 
 ## Câu 3: Interceptor có thể thay thế response hoàn toàn không?
 
-**Trả lời**: "Có. Interceptor có thể trả Observable mà không gọi `next.handle()` — ví dụ cache interceptor: nếu cache hit, trả kết quả cache mà không gọi handler."
+**Trả lời**: "Có. Interceptor có thể trả Observable mà không gọi `next.handle()` — ví dụ cache interceptor: nếu cache hit, trả `of(cachedData)` mà không gọi handler. Đây là khả năng mà Middleware, Guard, và Pipe đều không có."
 
 ## Câu 4: Tại sao dùng `APP_GUARD` provider thay vì `app.useGlobalGuards()`?
 
@@ -506,6 +718,26 @@ export class AppModule {}
 ## Câu 5: Pipe chạy khi nào? Trước hay sau guard?
 
 **Trả lời**: "Pipe chạy SAU guard và SAU interceptor (trước handler). Thứ tự: Guard kiểm tra quyền → Interceptor xử lý trước → Pipe validate dữ liệu → Handler xử lý nghiệp vụ."
+
+## Câu 6: `tap` và `map` trong Interceptor khác nhau thế nào?
+
+**Trả lời**: "`tap` là side-effect — nhìn data nhưng **không thay đổi** nó. Dùng cho logging, lưu cache, ghi metrics. `map` **biến đổi data** trước khi trả về client — dùng cho wrap response, xóa field nhạy cảm, format data. Cách nhớ: `tap` = nhìn nhưng không sờ, `map` = biến đổi."
+
+## Câu 7: Interceptor khác Pipe thế nào?
+
+**Trả lời**: "Pipe xử lý **dữ liệu đầu vào** (validate body, transform params) — chạy **trước** handler. Interceptor xử lý cả **trước và sau** handler — đặc biệt có thể biến đổi **response** bằng RxJS operators. Pipe không thể thay đổi response, Interceptor không thể validate từng parameter."
+
+## Câu 8: Khi có nhiều Exception Filter, filter nào được ưu tiên?
+
+**Trả lời**: "Filter cụ thể hơn sẽ chạy trước. Ví dụ nếu có `@Catch(NotFoundException)` và `@Catch(HttpException)`, khi ném `NotFoundException` thì filter cụ thể chạy. Nếu ném lỗi khác (không phải NotFoundException) thì filter `HttpException` chạy. Filter `@Catch()` (không tham số) bắt tất cả — chạy cuối cùng nếu không filter nào khác bắt được."
+
+## Câu 9: NestJS xử lý lỗi mặc định như thế nào nếu không có Exception Filter?
+
+**Trả lời**: "NestJS có **Global Exception Filter mặc định** xử lý mọi lỗi chưa được bắt. Nếu là `HttpException` → trả status code + message tương ứng. Nếu là lỗi khác → trả 500 Internal Server Error. Custom Filter chỉ cần khi muốn format lỗi khác mặc định — ví dụ thêm `timestamp`, `path`, hoặc log chi tiết."
+
+## Câu 10: Cho ví dụ kết hợp Guard + Interceptor + Pipe thực tế?
+
+**Trả lời**: "Endpoint tạo order: `AuthGuard` kiểm tra JWT token → `RolesGuard` đọc metadata `@Roles('customer')` để chỉ cho customer → `LoggingInterceptor` đo thời gian xử lý (dùng `tap`) → `ZodValidationPipe` validate body theo schema → Handler tạo order → `TransformInterceptor` wrap response thành `{ success: true, data }` (dùng `map`). Nếu lỗi ở bất kỳ bước nào → `HttpExceptionFilter` format lỗi trả về."
 
 ---
 
@@ -517,3 +749,4 @@ export class AppModule {}
 | Interceptors | [docs.nestjs.com/interceptors](https://docs.nestjs.com/interceptors) |
 | Pipes | [docs.nestjs.com/pipes](https://docs.nestjs.com/pipes) |
 | Exception Filters | [docs.nestjs.com/exception-filters](https://docs.nestjs.com/exception-filters) |
+| RxJS Operators | [rxjs.dev/api](https://rxjs.dev/api) |
