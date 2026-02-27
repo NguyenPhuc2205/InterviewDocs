@@ -1,10 +1,10 @@
-# SQL Fundamentals
+# Nền tảng SQL — SQL Fundamentals
 
-> **Chủ đề phỏng vấn kinh điển** — JOINs, Indexing, Subqueries, Normalization. Kiến thức áp dụng cho PostgreSQL, MySQL, và bất kỳ RDBMS nào.
+> Tài liệu ôn tập phỏng vấn — bao gồm toàn bộ kiến thức SQL cốt lõi cần nắm: JOIN (kết hợp bảng), Indexing (chỉ mục tăng tốc truy vấn), Subqueries và CTE (truy vấn con), Normalization (chuẩn hoá dữ liệu), EXPLAIN ANALYZE (phân tích truy vấn), và ORM (ánh xạ đối tượng-quan hệ). Áp dụng cho PostgreSQL, MySQL, và bất kỳ hệ quản trị cơ sở dữ liệu quan hệ nào.
 
 ---
 
-# 1. JOIN — Kết hợp bảng
+# 1. JOIN (Kết hợp bảng)
 
 ## Tại sao cần JOIN?
 
@@ -114,15 +114,15 @@ LEFT JOIN employees m ON e.manager_id = m.id;
 
 ---
 
-# 2. Indexing — Tăng tốc truy vấn
+# 2. Indexing (Chỉ mục — Tăng tốc truy vấn)
 
-## Index là gì?
+## Index (Chỉ mục) là gì?
 
-**Khái niệm**: Index là một **cấu trúc dữ liệu phụ** (auxiliary data structure), được tạo riêng biệt khỏi bảng chính. Nó lưu **bản sao đã sắp xếp** của giá trị một hoặc nhiều column, kèm theo **pointer** trỏ về vị trí row thực tế trong bảng. Nhờ đó, database không cần quét toàn bộ bảng (Sequential Scan) mà có thể **định vị trực tiếp** row cần tìm (Index Scan) với độ phức tạp thấp hơn.
+**Khái niệm:** Index (chỉ mục) là một **cấu trúc dữ liệu phụ** (auxiliary data structure), được tạo riêng biệt khỏi bảng chính. Nó lưu **bản sao đã sắp xếp** của giá trị một hoặc nhiều cột, kèm theo **con trỏ (pointer)** trỏ về vị trí dòng (row) thực tế trong bảng. Nhờ đó, cơ sở dữ liệu không cần quét toàn bộ bảng (Sequential Scan — quét tuần tự) mà có thể **định vị trực tiếp** dòng cần tìm (Index Scan — quét qua chỉ mục) với độ phức tạp thấp hơn.
 
 > 💡 **Analogy**: Giống **mục lục cuốn sách** — thay vì đọc từng trang để tìm nội dung, bạn tra mục lục → đi thẳng tới trang cần tìm.
 
-**Trade-off**: Index tăng tốc **đọc** (SELECT) nhưng làm **chậm ghi** (INSERT, UPDATE, DELETE) — vì mỗi lần ghi, database phải cập nhật cả bảng chính lẫn index. Ngoài ra, index chiếm thêm **disk space**.
+**Đánh đổi (trade-off):** Index tăng tốc **đọc** (SELECT) nhưng làm **chậm ghi** (INSERT, UPDATE, DELETE) — vì mỗi lần ghi, cơ sở dữ liệu phải cập nhật cả bảng chính lẫn chỉ mục. Ngoài ra, chỉ mục chiếm thêm **dung lượng ổ đĩa**.
 
 ## Các loại Index trong PostgreSQL
 
@@ -218,7 +218,7 @@ CREATE INDEX idx_users_email_incl ON users(email) INCLUDE (name);
 
 ---
 
-# 3. Subqueries & CTE
+# 3. Subqueries & CTE (Truy vấn con và Biểu thức bảng chung)
 
 ## Subquery (truy vấn con)
 
@@ -256,7 +256,7 @@ JOIN high_spenders hs ON u.id = hs.user_id;
 - CTE có thể **recursive** (duyệt cây, hierarchy)
 - Performance thường tương đương (PostgreSQL tự optimize)
 
-## Window Functions
+## Window Functions (Hàm cửa sổ)
 
 ```sql
 -- Xếp hạng users theo tổng chi tiêu
@@ -282,7 +282,7 @@ GROUP BY u.id, u.name;
 
 ---
 
-# 4. Normalization — Chuẩn hóa dữ liệu
+# 4. Normalization (Chuẩn hoá dữ liệu)
 
 ## Tại sao cần chuẩn hóa?
 
@@ -336,7 +336,7 @@ Giảm **data redundancy** (trùng lặp) và **anomalies** (bất thường khi
 
 ---
 
-# 5. EXPLAIN ANALYZE — Đọc Query Plan
+# 5. EXPLAIN ANALYZE — Phân tích kế hoạch truy vấn (Query Plan)
 
 ## Cách dùng
 
@@ -608,20 +608,20 @@ const prisma = new PrismaClient({ adapter })
 
 ---
 
-# 7. Chốt — Câu hỏi phỏng vấn thường gặp
+# 7. Câu hỏi phỏng vấn thường gặp
 
-| Câu hỏi | Key answer |
+| Câu hỏi | Gợi ý trả lời |
 |---|---|
-| INNER vs LEFT JOIN? | INNER: chỉ khớp cả 2. LEFT: tất cả trái + khớp phải (NULL nếu không có) |
-| Index là gì? Trade-off? | Cấu trúc dữ liệu tăng tốc đọc, nhưng làm chậm ghi và tốn storage |
-| B-tree vs Hash index? | B-tree: equality + range + sorting. Hash: chỉ equality |
-| Composite index leftmost prefix? | Index (A,B,C) chỉ dùng được cho queries bắt đầu từ A |
-| Khi nào KHÔNG tạo index? | Bảng nhỏ, low cardinality, write-heavy, query hiếm khi filter column đó |
-| CTE vs Subquery? | CTE dễ đọc hơn, có thể recursive. Performance thường tương đương |
-| Normalization là gì? | Giảm data redundancy. 1NF: atomic. 2NF: no partial dependency. 3NF: no transitive dependency |
-| Khi nào denormalize? | Read performance quan trọng hơn → giảm JOINs → nhanh hơn |
-| EXPLAIN ANALYZE cho biết gì? | Scan type, cost, actual time, rows scanned. Seq Scan trên bảng lớn → cần index |
-| ORM là gì? | Kỹ thuật lập trình ánh xạ dữ liệu giữa DB quan hệ (table/row/column) và objects trong OOP (class/object/property). Thao tác objects, ORM sinh SQL |
-| Active Record vs Data Mapper? | AR: model tự lo DB (simple, coupled). DM: tách model khỏi DB (clean, phức tạp hơn) |
-| Prisma thuộc pattern nào? | Không thuộc AR hay DM — schema-first approach, gần query builder + code generator |
-| Prisma v7 thay đổi gì? | Bỏ Rust engine → TypeScript-only, driver adapter bắt buộc, nhẹ hơn ~90% |
+| INNER JOIN khác LEFT JOIN thế nào? | INNER JOIN chỉ trả về dòng khớp ở **cả hai** bảng. LEFT JOIN giữ **tất cả** dòng bên trái, dòng bên phải không khớp thì trả NULL |
+| Index (chỉ mục) là gì? Đánh đổi gì? | Cấu trúc dữ liệu phụ giúp tăng tốc truy vấn đọc (SELECT), nhưng làm chậm ghi (INSERT/UPDATE/DELETE) vì phải cập nhật cả chỉ mục, và tốn thêm dung lượng ổ đĩa |
+| B-tree khác Hash index thế nào? | B-tree hỗ trợ so sánh bằng, khoảng (range), và sắp xếp. Hash chỉ hỗ trợ so sánh bằng (exact equality) |
+| Quy tắc "leftmost prefix" của Composite Index? | Chỉ mục (A, B, C) chỉ dùng được khi truy vấn bắt đầu từ cột A. Truy vấn chỉ trên B hoặc C thì không dùng được chỉ mục |
+| Khi nào KHÔNG nên tạo Index? | Bảng nhỏ (vài trăm dòng), cột có ít giá trị duy nhất (ví dụ: giới tính chỉ có 2 giá trị), bảng ghi nhiều hơn đọc, hoặc cột hiếm khi dùng trong WHERE/JOIN/ORDER BY |
+| CTE khác Subquery thế nào? | CTE (WITH) dễ đọc hơn, có thể đệ quy (recursive). Hiệu suất thường tương đương — PostgreSQL tự tối ưu |
+| Chuẩn hoá (Normalization) là gì? | Giảm trùng lặp dữ liệu (redundancy). 1NF: mỗi ô chỉ 1 giá trị. 2NF: không phụ thuộc một phần khoá. 3NF: không phụ thuộc bắc cầu (transitive dependency) |
+| Khi nào phi chuẩn hoá (Denormalize)? | Khi hiệu suất đọc quan trọng hơn → giảm số lần JOIN → truy vấn nhanh hơn. Chấp nhận dữ liệu dư thừa có chủ đích |
+| EXPLAIN ANALYZE cho biết gì? | Loại quét (Seq Scan/Index Scan), chi phí ước tính (cost), thời gian thực tế (actual time), số dòng đã quét. Nếu thấy Seq Scan trên bảng lớn → cần thêm chỉ mục |
+| ORM là gì? | Kỹ thuật lập trình ánh xạ dữ liệu giữa cơ sở dữ liệu quan hệ (bảng/dòng/cột) và đối tượng trong lập trình hướng đối tượng (class/object/property). Thao tác qua đối tượng, ORM tự sinh SQL |
+| Active Record khác Data Mapper thế nào? | Active Record: model tự biết cách lưu vào cơ sở dữ liệu (đơn giản, gắn chặt). Data Mapper: tách model khỏi logic cơ sở dữ liệu, repository lo việc lưu trữ (tách biệt, linh hoạt hơn) |
+| Prisma thuộc pattern nào? | Không thuộc Active Record hay Data Mapper — Prisma dùng cách tiếp cận schema-first (khai báo schema trước, tool tự sinh typed client), gần query builder + code generator hơn |
+| Prisma v7 thay đổi gì? | Loại bỏ Query Engine bằng Rust → chuyển sang TypeScript thuần, Driver Adapter bắt buộc, nhẹ hơn khoảng 90% |

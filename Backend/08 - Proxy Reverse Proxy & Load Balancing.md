@@ -1,14 +1,14 @@
-# Proxy, Reverse Proxy & Load Balancing
+# Proxy, Reverse Proxy & Cân bằng tải — Proxy, Reverse Proxy & Load Balancing
 
-> **Kiến thức system design** — Forward/Reverse Proxy, Nginx, Load Balancing algorithms. Biết để trả lời câu hỏi "Hệ thống của bạn scale thế nào?"
+> Tài liệu ôn tập phỏng vấn — Kiến thức thiết kế hệ thống (System Design): Forward Proxy (proxy xuôi), Reverse Proxy (proxy ngược), Nginx, các thuật toán cân bằng tải (Load Balancing), CDN (mạng phân phối nội dung), và API Gateway (cổng API). Biết để trả lời câu hỏi: "Hệ thống của bạn mở rộng (scale) thế nào?"
 
 ---
 
-# 1. Forward Proxy
+# 1. Forward Proxy (Proxy xuôi)
 
-## Là gì?
+## Khái niệm
 
-Forward Proxy đứng **phía client** — đại diện client gửi request tới server. Server KHÔNG biết client thật là ai.
+Forward Proxy (proxy xuôi) đứng **phía client** — đại diện client gửi yêu cầu tới server. Server **không biết** client thật là ai — chỉ thấy địa chỉ IP của proxy.
 
 ```
 Client A ──┐
@@ -30,11 +30,11 @@ Client C ──┘
 
 ---
 
-# 2. Reverse Proxy
+# 2. Reverse Proxy (Proxy ngược)
 
-## Là gì?
+## Khái niệm
 
-Reverse Proxy đứng **phía server** — đại diện server nhận request từ client. Client KHÔNG biết server thật ở đâu.
+Reverse Proxy (proxy ngược) đứng **phía server** — đại diện server nhận yêu cầu từ client. Client **không biết** server thật ở đâu — chỉ thấy reverse proxy.
 
 ```
                                    ┌──► App Server 1 (port 3001)
@@ -116,15 +116,15 @@ server {
 
 ---
 
-# 4. Load Balancing
+# 4. Cân bằng tải (Load Balancing)
 
-## Tại sao cần?
+## Tại sao cần cân bằng tải?
 
-1 server → giới hạn traffic → cần **nhiều servers** → cần **phân phối requests**.
+1 server có giới hạn lưu lượng (traffic) → cần **nhiều server** → cần **phân phối yêu cầu** đều giữa các server.
 
-## Algorithms phổ biến
+## Các thuật toán cân bằng tải phổ biến
 
-### Round Robin (mặc định Nginx)
+### Round Robin (Luân phiên — mặc định Nginx)
 
 ```
 Request 1 → Server A
@@ -136,7 +136,7 @@ Request 4 → Server A  ← lặp lại
 **Ưu điểm**: Đơn giản, công bằng.
 **Nhược điểm**: Không xét server nào đang bận.
 
-### Weighted Round Robin
+### Weighted Round Robin (Luân phiên có trọng số)
 
 ```nginx
 upstream backend {
@@ -146,7 +146,7 @@ upstream backend {
 # Server mạnh hơn → weight cao hơn
 ```
 
-### Least Connections
+### Least Connections (Ít kết nối nhất)
 
 ```
 → Forward request tới server có ÍT CONNECTION NHẤT hiện tại
@@ -161,7 +161,7 @@ upstream backend {
 }
 ```
 
-### IP Hash
+### IP Hash (Băm địa chỉ IP — Phiên cố định)
 
 ```
 → Hash client IP → luôn route tới CÙNG server
@@ -185,20 +185,20 @@ upstream backend {
 | **Least Connections** | Server ít connection nhất | Requests có thời gian xử lý khác nhau |
 | **IP Hash** | Hash IP → cùng server | Cần session persistence |
 
-## L4 vs L7 Load Balancing
+## Cân bằng tải L4 và L7 (L4 vs L7 Load Balancing)
 
-| | L4 (Transport) | L7 (Application) |
+| | L4 (Tầng truyền tải — Transport) | L7 (Tầng ứng dụng — Application) |
 |---|---|---|
-| **Layer** | TCP/UDP | HTTP/HTTPS |
-| **Nhìn thấy** | IP + Port | URL, Headers, Cookies, Body |
-| **Routing** | Chỉ dựa trên IP/Port | Dựa trên URL path, header content |
-| **Performance** | 🟢 Nhanh hơn | 🔴 Chậm hơn (phải parse HTTP) |
+| **Tầng mạng** | TCP/UDP | HTTP/HTTPS |
+| **Nhìn thấy gì** | Địa chỉ IP + Cổng | URL, Headers, Cookies, Body |
+| **Định tuyến (Routing)** | Chỉ dựa trên IP/Cổng | Dựa trên đường dẫn URL, nội dung header |
+| **Hiệu suất** | 🟢 Nhanh hơn (không cần phân tích HTTP) | 🔴 Chậm hơn (phải phân tích HTTP) |
 | **Ví dụ** | AWS NLB | Nginx, AWS ALB |
-| **Use case** | Database, TCP services | HTTP APIs, microservices routing |
+| **Dùng khi** | Cơ sở dữ liệu, dịch vụ TCP | HTTP API, định tuyến microservices |
 
 ---
 
-# 5. CDN (Content Delivery Network)
+# 5. CDN (Content Delivery Network — Mạng phân phối nội dung)
 
 ```
 Không CDN:
@@ -209,11 +209,11 @@ Có CDN:
                      (cached content)
 ```
 
-**CDN** = Network of edge servers phân bố toàn cầu. Cache static content (images, CSS, JS) ở server gần user nhất.
+**CDN** = Mạng các máy chủ biên (edge server) phân bố toàn cầu. Lưu bản sao (cache) nội dung tĩnh (hình ảnh, CSS, JS) tại máy chủ gần người dùng nhất → giảm độ trễ (latency) đáng kể.
 
 ---
 
-# 6. API Gateway
+# 6. API Gateway (Cổng API)
 
 ```
                               ┌──► User Service
@@ -227,17 +227,17 @@ Client ──► API Gateway ───────┼──► Order Service
            └── Protocol Translation
 ```
 
-**API Gateway** = Single entry point cho tất cả API requests. Xử lý cross-cutting concerns.
+**API Gateway (Cổng API)** = Điểm vào duy nhất (single entry point) cho tất cả các yêu cầu API. Xử lý các mối quan tâm chung (cross-cutting concerns) như xác thực, giới hạn tốc độ, định tuyến, gộp phản hồi, và chuyển đổi giao thức.
 
 ---
 
-# 7. Chốt — Câu hỏi phỏng vấn thường gặp
+# 7. Câu hỏi phỏng vấn thường gặp
 
-| Câu hỏi | Key answer |
+| Câu hỏi | Gợi ý trả lời |
 |---|---|
-| Forward vs Reverse Proxy? | Forward: phía client (ẩn client). Reverse: phía server (ẩn server, load balancing) |
-| Nginx dùng làm gì? | Reverse proxy, load balancer, SSL termination, serve static files |
-| Round Robin vs Least Connections? | RR: lần lượt. LC: chọn server ít connection nhất. LC tốt hơn khi request time khác nhau |
-| L4 vs L7 LB? | L4: TCP layer (nhanh, không biết HTTP). L7: HTTP layer (routing theo URL/header) |
-| CDN là gì? | Network of edge servers cache static content gần user → giảm latency |
-| API Gateway? | Single entry point cho microservices. Xử lý auth, rate limit, routing, aggregation |
+| Forward Proxy khác Reverse Proxy thế nào? | Forward Proxy (ở phía client): ẩn danh tính client. Reverse Proxy (ở phía server): ẩn hạ tầng server, cân bằng tải, xử lý SSL |
+| Nginx dùng làm gì? | Reverse proxy (proxy ngược), cân bằng tải (load balancer), xử lý SSL (SSL termination), phục vụ file tĩnh (static files) |
+| Round Robin khác Least Connections thế nào? | Round Robin: luân phiên gửi lần lượt. Least Connections: chọn server có ít kết nối nhất. Least Connections tốt hơn khi các yêu cầu có thời gian xử lý khác nhau |
+| L4 khác L7 Load Balancing thế nào? | L4 (tầng TCP): nhanh, không biết nội dung HTTP. L7 (tầng HTTP): định tuyến theo đường dẫn URL, header — linh hoạt hơn nhưng chậm hơn |
+| CDN là gì? | Mạng các máy chủ biên (edge server) phân bố toàn cầu, lưu bản sao nội dung tĩnh gần người dùng → giảm độ trễ |
+| API Gateway là gì? | Điểm vào duy nhất cho microservices. Xử lý xác thực, giới hạn tốc độ, định tuyến, gộp phản hồi |

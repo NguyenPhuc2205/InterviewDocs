@@ -1,14 +1,14 @@
-# Prisma Deep Dive
+# Tìm hiểu sâu Prisma — Prisma Deep Dive
 
-> **Chủ đề phỏng vấn thực tế** — Bạn dùng Prisma hàng ngày, interviewer chắc chắn hỏi. Bao gồm: Schema, Relations, Client API, Transactions, Extensions, Migrations, so sánh ORM.
+> Tài liệu ôn tập phỏng vấn — Prisma là ORM bạn dùng hàng ngày, người phỏng vấn chắc chắn hỏi. Bao gồm: Schema (định nghĩa cấu trúc), Relations (quan hệ), Client API (đọc/ghi dữ liệu), Transactions (giao dịch), Extensions (mở rộng), Migrations (di chuyển cơ sở dữ liệu), và so sánh với các ORM khác.
 
 ---
 
 # 1. Prisma là gì? — Khác gì các ORM khác?
 
-## Các cách tiếp cận truy cập DB trong Node.js
+## Các cách tiếp cận truy cập cơ sở dữ liệu trong Node.js
 
-Có hai **design patterns chính thức** (từ Martin Fowler — *Patterns of Enterprise Application Architecture*) và hai cách tiếp cận khác phổ biến trong hệ sinh thái Node.js:
+Có hai **mẫu thiết kế chính thức** (từ Martin Fowler — *Patterns of Enterprise Application Architecture*) và hai cách tiếp cận khác phổ biến trong hệ sinh thái Node.js:
 
 ### Active Record — "Model tự biết cách lưu chính nó"
 
@@ -106,9 +106,7 @@ model User {
 | **Learning curve** | 🟢 Dễ | 🟡 Trung bình | 🟡 Trung bình |
 | **Performance** | 🟢 Tốt (generated queries) | 🟡 Tùy cách dùng | 🟡 Tùy cách dùng |
 
----
-
-# 2. Prisma Schema
+# 2. Prisma Schema (Định nghĩa cấu trúc cơ sở dữ liệu)
 
 ```prisma
 // schema.prisma
@@ -203,7 +201,7 @@ enum Role {
 
 ---
 
-# 3. Client API — CRUD Operations
+# 3. Client API — Các thao tác CRUD (Tạo/Đọc/Cập nhật/Xoá)
 
 ## Querying
 
@@ -338,7 +336,7 @@ await prisma.product.update({
 
 ---
 
-# 4. Transactions
+# 4. Giao dịch (Transactions)
 
 ```typescript
 // Sequential — array of operations (chạy tuần tự, tất cả trong 1 transaction)
@@ -366,7 +364,7 @@ const result = await prisma.$transaction(async (tx) => {
 
 ---
 
-# 5. Raw Queries
+# 5. Truy vấn SQL thô (Raw Queries)
 
 ```typescript
 // Tagged template (AN TOÀN — auto parameterized)
@@ -390,7 +388,7 @@ await prisma.$queryRawUnsafe(query); // ❌ Chỉ dùng khi dynamic table/column
 
 ---
 
-# 6. Prisma Extensions
+# 6. Mở rộng Prisma (Prisma Extensions)
 
 ```typescript
 // Thêm methods custom cho model
@@ -419,7 +417,7 @@ await xprisma.user.softDelete(1);
 
 ---
 
-# 7. Migration Workflow
+# 7. Quy trình Migration (Di chuyển cơ sở dữ liệu)
 
 ```bash
 # 1. Sửa schema.prisma
@@ -445,14 +443,14 @@ npx prisma studio
 
 ---
 
-# 8. Chốt — Câu hỏi phỏng vấn thường gặp
+# 8. Câu hỏi phỏng vấn thường gặp
 
-| Câu hỏi | Key answer |
+| Câu hỏi | Gợi ý trả lời |
 |---|---|
-| Prisma khác TypeORM/Sequelize thế nào? | Prisma dùng schema-first approach (không phải ORM truyền thống — gần query builder + code generator). TypeORM hỗ trợ cả Active Record và Data Mapper (2 design patterns chính thức từ PoEAA). Sequelize dùng Active Record |
-| include vs select? | include: tất cả fields + relation. select: chỉ fields cần → performance tốt hơn |
-| 2 loại transaction trong Prisma? | Sequential: `$transaction([...])`. Interactive: `$transaction(async (tx) => {...})` |
-| N+1 trong Prisma? | Dùng `include` hoặc `select` với nested relations → Prisma tự tối ưu thành 2 queries |
-| Raw query an toàn thế nào? | Dùng tagged template `$queryRaw\`...\`` → auto parameterized. KHÔNG dùng string interpolation |
-| Prisma extension là gì? | `$extends` tạo client mới với custom methods. KHÔNG mutate client cũ |
-| implicit vs explicit many-to-many? | Implicit: Prisma tạo join table tự động. Explicit: tạo join model thủ công (khi cần extra fields) |
+| Prisma khác TypeORM/Sequelize thế nào? | Prisma dùng cách tiếp cận **schema-first** (không phải ORM truyền thống — gần query builder + code generator hơn). TypeORM hỗ trợ cả Active Record và Data Mapper (2 mẫu thiết kế chính thức từ PoEAA). Sequelize dùng Active Record |
+| `include` khác `select` thế nào? | `include` lấy tất cả trường + quan hệ. `select` chỉ lấy trường chỉ định → hiệu suất tốt hơn vì giảm dữ liệu truyền tải |
+| Prisma có mấy loại giao dịch? | 2 loại: **Sequential** (tuần tự) — `$transaction([...])` chạy danh sách thao tác tuần tự. **Interactive** (tương tác) — `$transaction(async (tx) => {...})` cho phép logic phức tạp giữa các thao tác |
+| Vấn đề N+1 trong Prisma giải quyết thế nào? | Dùng `include` hoặc `select` với quan hệ lồng nhau (nested relations) → Prisma tự tối ưu thành 2 truy vấn thay vì N+1 |
+| Truy vấn SQL thô (Raw Query) an toàn thế nào? | Dùng tagged template `$queryRaw\`...\`` → Prisma tự tham số hoá (auto parameterized). TUYỆT ĐỐI KHÔNG dùng ghép chuỗi (string interpolation) → dễ bị SQL Injection |
+| Prisma Extension là gì? | `$extends` tạo một **client mới** với các phương thức tuỳ chỉnh. KHÔNG thay đổi (mutate) client cũ — phải dùng client mới |
+| Implicit khác explicit nhiều-nhiều (many-to-many) thế nào? | **Implicit (ngầm định):** Prisma tự tạo bảng trung gian (join table). **Explicit (tường minh):** lập trình viên tạo model trung gian thủ công — dùng khi cần thêm trường dữ liệu vào quan hệ |

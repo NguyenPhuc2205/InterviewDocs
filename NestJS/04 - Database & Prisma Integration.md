@@ -1,18 +1,121 @@
-# Database & Prisma Integration
+# Tích hợp cơ sở dữ liệu & Prisma — Database & Prisma Integration
 
-> Tài liệu ôn tập phỏng vấn — PrismaModule setup, PrismaService, transactions, soft delete, pagination, repository pattern, testing.
+> Tài liệu ôn tập phỏng vấn — bao gồm: ORM là gì (ánh xạ đối tượng-quan hệ), cơ chế PrismaClient (kiến trúc bên trong), thiết lập PrismaService trong NestJS, giao dịch (transactions), xoá mềm (soft delete), phân trang (pagination), và xử lý lỗi.
 
 ---
 
 ## Mục lục
 
-1. [PrismaService — Setup chuẩn](#1-prismaservice--setup-chuẩn)
-2. [PrismaModule — Module pattern](#2-prismamodule--module-pattern)
+0. [ORM và cơ chế PrismaClient](#0-orm-và-cơ-chế-prismaclient)
+1. [PrismaService — Thiết lập chuẩn](#1-prismaservice--thiết-lập-chuẩn)
+2. [PrismaModule — Mẫu module](#2-prismamodule--mẫu-module)
 3. [Transactions — Giao dịch](#3-transactions--giao-dịch)
 4. [Pagination — Phân trang](#4-pagination--phân-trang)
 5. [Soft Delete — Xoá mềm](#5-soft-delete--xoá-mềm)
-6. [Error Handling với Prisma](#6-error-handling-với-prisma)
+6. [Xử lý lỗi với Prisma](#6-xử-lý-lỗi-với-prisma)
 7. [Câu hỏi phỏng vấn thường gặp](#7-câu-hỏi-phỏng-vấn-thường-gặp)
+
+---
+
+# 0. ORM và cơ chế PrismaClient
+
+## ORM (Object-Relational Mapping — Ánh xạ đối tượng-quan hệ) là gì?
+
+**ORM** là kỹ thuật lập trình **ánh xạ dữ liệu** giữa hai thế giới khác nhau:
+- **Cơ sở dữ liệu quan hệ:** bảng (table), dòng (row), cột (column)
+- **Lập trình hướng đối tượng:** lớp (class), đối tượng (object), thuộc tính (property)
+
+```
+Không có ORM:
+  Lập trình viên viết SQL thủ công → nhận mảng dữ liệu thô → tự chuyển đổi thành đối tượng
+
+Có ORM:
+  Lập trình viên thao tác qua đối tượng → ORM TỰ ĐỘNG sinh SQL → tự chuyển đổi kết quả thành đối tượng
+```
+
+## 3 cách tiếp cận chính
+
+### Active Record — "Model tự biết cách lưu chính nó"
+
+```typescript
+// Model VỪA chứa dữ liệu VỪA chứa logic cơ sở dữ liệu
+const user = new User();
+user.name = "Alice";
+user.email = "alice@test.com";
+await user.save();         // ← model tự gọi INSERT INTO users ...
+await user.remove();       // ← model tự gọi DELETE FROM users ...
+// Đại diện: Sequelize, TypeORM (chế độ Active Record)
+```
+
+### Data Mapper — "Tách model khỏi logic cơ sở dữ liệu"
+
+```typescript
+// Model CHỈ chứa dữ liệu, Repository lo việc lưu trữ
+const user = new User();
+user.name = "Alice";
+await userRepository.save(user);   // ← Repository lo INSERT
+await userRepository.remove(user); // ← Repository lo DELETE
+// Đại diện: TypeORM (chế độ Data Mapper)
+```
+
+### Schema-first — "Khai báo schema trước, tool tự sinh code"
+
+```prisma
+// Khai báo schema trong file riêng (schema.prisma):
+model User {
+  id    Int    @id @default(autoincrement())
+  name  String
+  email String @unique
+}
+// → Chạy `prisma generate` → sinh ra Typed Client hoàn chỉnh
+// Đại diện: Prisma
+```
+
+## Cơ chế hoạt động bên trong của PrismaClient
+
+```
+                    Luồng hoạt động của Prisma
+┌─────────────────────────────────────────────────────────────────┐
+│                                                                 │
+│  ① schema.prisma                                                │
+│     Lập trình viên khai báo models, relations, datasource       │
+│                    │                                            │
+│                    ▼                                            │
+│  ② npx prisma generate                                         │
+│     Prisma CLI đọc schema → sinh ra:                           │
+│     • PrismaClient class (trong node_modules/.prisma/client)   │
+│     • Typed interfaces cho mọi model                           │
+│     • Typed methods: findMany, create, update, delete...       │
+│                    │                                            │
+│                    ▼                                            │
+│  ③ PrismaClient (trong code ứng dụng)                          │
+│     prisma.user.findMany({...})                                │
+│     ↓ TypeScript method call                                   │
+│     → Chuyển đổi thành AST truy vấn nội bộ                    │
+│     → Gửi tới Query Engine                                     │
+│                    │                                            │
+│                    ▼                                            │
+│  ④ Query Engine                                                │
+│     Prisma v6: Rust binary (file riêng, nặng ~15MB)            │
+│     Prisma v7: TypeScript thuần (nhẹ hơn ~90%)                 │
+│     → Nhận AST → Sinh SQL thật → Gửi tới Database             │
+│                    │                                            │
+│                    ▼                                            │
+│  ⑤ Database (PostgreSQL, MySQL, SQLite, v.v.)                  │
+│     → Thực thi SQL → Trả kết quả                              │
+│     → Query Engine chuyển kết quả thành typed objects          │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Prisma v7 — Thay đổi quan trọng
+
+| | Prisma v6 trở về trước | Prisma v7 |
+|---|---|---|
+| **Query Engine** | Rust binary riêng biệt (~15MB) | TypeScript thuần (không cần binary) |
+| **Driver** | Prisma tự quản lý kết nối | **Driver Adapter bắt buộc** — dùng driver native (pg, mysql2...) |
+| **Kích thước** | Nặng (Rust binary + engine) | Nhẹ hơn ~90% |
+| **Ý nghĩa** | Khó debug (Rust), cold start chậm | Dễ debug, tối ưu cho serverless/edge |
 
 ---
 

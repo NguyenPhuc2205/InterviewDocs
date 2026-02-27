@@ -1,12 +1,12 @@
-# Transactions & ACID
+# Giao dịch & Tính chất ACID — Transactions & ACID
 
-> **Chủ đề phỏng vấn quan trọng** — ACID properties, Isolation Levels, Locking strategies, Deadlocks. Kiến thức nền tảng cho bất kỳ backend developer nào.
+> Tài liệu ôn tập phỏng vấn — bao gồm toàn bộ kiến thức về giao dịch cơ sở dữ liệu cần nắm: tính chất ACID (Atomicity — tính nguyên tử, Consistency — tính nhất quán, Isolation — tính cô lập, Durability — tính bền vững), các mức cô lập (Isolation Levels), chiến lược khoá (Locking Strategies), và khoá chết (Deadlocks). Kiến thức nền tảng bắt buộc cho bất kỳ lập trình viên backend nào.
 
 ---
 
-# 1. Transaction là gì?
+# 1. Transaction (Giao dịch) là gì?
 
-Transaction là một **nhóm operations** được thực thi như **một đơn vị duy nhất** — hoặc **tất cả thành công**, hoặc **tất cả rollback** (quay lại trạng thái ban đầu).
+Transaction (giao dịch) là một **nhóm thao tác** được thực thi như **một đơn vị duy nhất** — hoặc **tất cả thành công**, hoặc **tất cả quay lui (rollback)** về trạng thái ban đầu. Nguyên tắc "tất cả hoặc không gì cả" (all or nothing) đảm bảo dữ liệu luôn nhất quán.
 
 ```sql
 -- Chuyển tiền từ Alice → Bob: 2 operations phải CÙNG thành công hoặc CÙNG thất bại
@@ -21,16 +21,16 @@ COMMIT;
 
 ---
 
-# 2. ACID Properties
+# 2. Tính chất ACID
 
-| Property | Ý nghĩa | Ví dụ |
-|---|---|---|
-| **Atomicity** | Tất cả hoặc không gì cả | Chuyển tiền: trừ Alice + cộng Bob → cả 2 hoặc không |
-| **Consistency** | DB luôn ở trạng thái hợp lệ trước và sau transaction | Tổng tiền trong hệ thống không đổi sau chuyển tiền |
-| **Isolation** | Các transactions chạy đồng thời không ảnh hưởng nhau | 2 người cùng chuyển tiền không bị xung đột |
-| **Durability** | Sau khi COMMIT, data tồn tại vĩnh viễn kể cả khi crash | Server tắt ngay sau COMMIT → data vẫn còn |
+| Tính chất | Tên tiếng Việt | Ý nghĩa | Ví dụ |
+|---|---|---|---|
+| **Atomicity** | Tính nguyên tử | Tất cả hoặc không gì cả — không có trạng thái "nửa chừng" | Chuyển tiền: trừ Alice + cộng Bob → cả 2 hoặc không thao tác nào |
+| **Consistency** | Tính nhất quán | Cơ sở dữ liệu luôn ở trạng thái hợp lệ trước và sau giao dịch | Tổng tiền trong hệ thống không đổi sau khi chuyển tiền |
+| **Isolation** | Tính cô lập | Các giao dịch chạy đồng thời không ảnh hưởng lẫn nhau | 2 người cùng chuyển tiền → mỗi giao dịch "tưởng" mình là duy nhất |
+| **Durability** | Tính bền vững | Sau khi COMMIT, dữ liệu tồn tại vĩnh viễn kể cả khi server sập | Server tắt ngay sau COMMIT → dữ liệu vẫn còn nguyên |
 
-### Atomicity chi tiết
+### Atomicity (Tính nguyên tử) chi tiết
 
 ```
 BEGIN
@@ -39,7 +39,7 @@ BEGIN
   └── ROLLBACK → Hoàn tác step 1 → Alice vẫn còn 100
 ```
 
-### Consistency chi tiết
+### Consistency (Tính nhất quán) chi tiết
 
 ```sql
 -- Constraint: balance >= 0
@@ -50,20 +50,20 @@ BEGIN;
 COMMIT;
 ```
 
-### Durability chi tiết
+### Durability (Tính bền vững) chi tiết
 
-PostgreSQL dùng **WAL (Write-Ahead Logging)**:
-1. Trước khi thay đổi data → ghi vào WAL log trước
-2. COMMIT → WAL flush vào disk
-3. Nếu crash → recovery từ WAL → data không mất
+PostgreSQL dùng **WAL (Write-Ahead Logging — Ghi trước vào nhật ký)**:
+1. Trước khi thay đổi dữ liệu → ghi thao tác vào WAL log trước
+2. COMMIT → đẩy (flush) WAL xuống ổ đĩa
+3. Nếu server sập → khôi phục (recovery) từ WAL → dữ liệu không mất
 
 ---
 
-# 3. Isolation Levels — Mức độ cô lập
+# 3. Isolation Levels (Các mức cô lập)
 
 ## Vấn đề khi nhiều transactions chạy đồng thời
 
-### Dirty Read
+### Dirty Read (Đọc bẩn — đọc dữ liệu chưa xác nhận)
 
 ```
 Transaction A:                     Transaction B:
@@ -78,7 +78,7 @@ ROLLBACK; → balance thực tế vẫn = 500
                                     → Transaction B đã đọc data SAI (dirty)
 ```
 
-### Non-repeatable Read
+### Non-repeatable Read (Đọc không lặp lại — cùng truy vấn cho kết quả khác)
 
 ```
 Transaction A:                     Transaction B:
@@ -95,7 +95,7 @@ WHERE user = 'alice';
 → balance = 0 ← KHÁC lần đọc trước!
 ```
 
-### Phantom Read
+### Phantom Read (Đọc bóng ma — dòng mới xuất hiện "ma quái")
 
 ```
 Transaction A:                     Transaction B:
@@ -137,11 +137,11 @@ SET default_transaction_isolation = 'serializable';
 
 ---
 
-# 4. Locking Strategies
+# 4. Chiến lược khoá (Locking Strategies)
 
-## Optimistic vs Pessimistic Locking
+## Khoá bi quan (Pessimistic) và Khoá lạc quan (Optimistic)
 
-### Pessimistic Locking — "Khóa trước, làm sau"
+### Pessimistic Locking (Khoá bi quan) — "Khoá trước, làm sau"
 
 ```sql
 -- Lock row → không ai sửa được cho đến khi COMMIT
@@ -156,7 +156,7 @@ COMMIT; -- ← UNLOCK
 
 **Dùng khi**: High contention — nhiều transactions cùng sửa 1 row (ví dụ: giảm stock sản phẩm hot).
 
-### Optimistic Locking — "Làm trước, check sau"
+### Optimistic Locking (Khoá lạc quan) — "Làm trước, kiểm tra sau"
 
 ```sql
 -- Không lock. Dùng version number để detect conflict.
@@ -214,7 +214,7 @@ async function purchaseProduct(productId: number) {
 
 ---
 
-# 5. Deadlocks
+# 5. Deadlock (Khoá chết)
 
 ## Là gì?
 
@@ -275,7 +275,7 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
 
 ---
 
-# 6. Transactions trong Prisma
+# 6. Giao dịch trong Prisma (Prisma Transactions)
 
 ```typescript
 // Sequential Transaction — chạy tuần tự trong 1 transaction
@@ -316,14 +316,14 @@ const result = await prisma.$transaction(async (tx) => {
 
 ---
 
-# 7. Chốt — Câu hỏi phỏng vấn thường gặp
+# 7. Câu hỏi phỏng vấn thường gặp
 
-| Câu hỏi | Key answer |
+| Câu hỏi | Gợi ý trả lời |
 |---|---|
-| ACID là gì? | Atomicity (tất cả/không), Consistency (hợp lệ), Isolation (cô lập), Durability (bền vững) |
-| Dirty Read là gì? | Đọc data chưa COMMIT → nếu ROLLBACK thì data sai |
-| Default isolation level PostgreSQL? | Read Committed |
-| Optimistic vs Pessimistic locking? | Optimistic: check version khi update (low contention). Pessimistic: lock row (high contention) |
-| Deadlock là gì? | 2 transactions chờ nhau giải phóng lock. PostgreSQL tự detect + abort 1 transaction |
-| Phòng deadlock thế nào? | Lock theo thứ tự cố định, transaction ngắn, retry logic |
-| Transaction trong Prisma? | Sequential: `$transaction([...])`. Interactive: `$transaction(async (tx) => {...})` |
+| ACID là gì? | 4 tính chất đảm bảo giao dịch đáng tin cậy: **A**tomicity (tính nguyên tử — tất cả hoặc không), **C**onsistency (tính nhất quán — dữ liệu luôn hợp lệ), **I**solation (tính cô lập — các giao dịch không ảnh hưởng nhau), **D**urability (tính bền vững — dữ liệu tồn tại vĩnh viễn sau COMMIT) |
+| Dirty Read (đọc bẩn) là gì? | Đọc dữ liệu mà giao dịch khác **chưa xác nhận** (chưa COMMIT). Nếu giao dịch đó quay lui (ROLLBACK) thì dữ liệu đã đọc là sai |
+| Mức cô lập mặc định của PostgreSQL? | Read Committed (đọc dữ liệu đã xác nhận) — đủ cho hầu hết ứng dụng thông thường |
+| Khoá lạc quan khác khoá bi quan thế nào? | **Khoá lạc quan (Optimistic):** không khoá dòng, dùng số phiên bản (version) để phát hiện xung đột khi cập nhật → phù hợp khi ít xung đột. **Khoá bi quan (Pessimistic):** khoá dòng trước khi sửa, giao dịch khác phải chờ → phù hợp khi nhiều xung đột |
+| Khoá chết (Deadlock) là gì? | 2 giao dịch trở lên chờ nhau giải phóng khoá → không ai tiến lên được. PostgreSQL tự phát hiện và huỷ 1 giao dịch để phá vỡ vòng chờ |
+| Phòng tránh khoá chết thế nào? | Luôn khoá tài nguyên theo **cùng thứ tự** cố định, giữ giao dịch **càng ngắn càng tốt**, và thêm logic **thử lại** (retry) khi gặp lỗi khoá chết |
+| Giao dịch trong Prisma có mấy loại? | 2 loại: **Sequential** (tuần tự) — `$transaction([...])` chạy danh sách thao tác. **Interactive** (tương tác) — `$transaction(async (tx) => {...})` cho phép logic phức tạp giữa các thao tác |

@@ -39,10 +39,10 @@
 
 ### 1.2 Đặc điểm chính
 | Đặc điểm              | Giải thích                                                         |
-| ---------------------- | ------------------------------------------------------------------ |
+| ---------------------- | ------------------------------------------------------------------|
 | **Single-threaded**    | Mặc định chạy trên 1 thread duy nhất (main thread)                |
 | **Event-driven**       | Hoạt động dựa trên cơ chế sự kiện (events)                        |
-| **Non-blocking I/O**   | Các tác vụ I/O không chặn thread chính                             |
+| **Non-blocking I/O**   | Các tác vụ I/O không chặn thread chính                            |
 | **Cross-platform**     | Chạy trên Windows, macOS, Linux                                   |
 | **V8 Engine**          | Biên dịch JS thành machine code (rất nhanh)                       |
 
@@ -75,7 +75,12 @@
 
 > **Q: Node.js là single-threaded, vậy nó xử lý concurrency như thế nào?**
 >
-> **A:** Node.js sử dụng **Event Loop** (single-threaded) kết hợp với **libuv thread pool** (multi-threaded, mặc định 4 threads) để xử lý các tác vụ I/O bất đồng bộ. Khi có tác vụ I/O (đọc file, query DB...), nó được đẩy sang thread pool, main thread tiếp tục xử lý các tác vụ khác. Khi I/O hoàn tất, callback được đưa vào Event Queue để Event Loop xử lý.
+> **A:** Node.js sử dụng **Event Loop** (single-threaded) kết hợp **OS-level async I/O** và **libuv thread pool** (mặc định 4 threads).
+>
+> - **Network I/O** (HTTP, TCP, UDP) → dùng **OS async I/O** (epoll/kqueue/IOCP) — **không cần thread pool**, hoàn toàn non-blocking. Đây là lý do Node.js handle hàng nghìn connections mà không cần hàng nghìn threads.
+> - **File I/O, DNS lookup, Crypto** → dùng **libuv thread pool** (4 threads mặc định) vì OS không cung cấp async API tốt cho file system.
+>
+> Khi tác vụ hoàn tất, callback được đưa vào **đúng phase** của Event Loop (Timers, Poll, Check...) — không phải 1 "Event Queue" duy nhất — để xử lý. Main thread tiếp tục xử lý các tác vụ khác trong lúc chờ.
 
 > **Q: So sánh Node.js với các backend truyền thống (Java, PHP)?**
 >
@@ -258,9 +263,9 @@ Event Loop là **trái tim** của Node.js. Nó là cơ chế cho phép Node.js 
 
 > ⚠️ **Điểm quan trọng:** Node.js **KHÔNG có "Macrotask Queue"** theo đúng nghĩa như browser. Thuật ngữ "macrotask" là khái niệm từ HTML spec (browser). Trong Node.js, thay vào đó là **6 phase queues riêng biệt**, mỗi phase có queue của nó. Nhiều tài liệu dùng chung thuật ngữ "macrotask" cho dễ hiểu khi so sánh với browser — nhưng về mặt kỹ thuật chính xác thì Node.js không sử dụng tên đó.
 
-### 2.3 Các phase của Event Loop (Macrotask Queues)
+### 2.3 Các phase của Event Loop
 
-Mỗi phase trong Event Loop là **một hàng đợi macrotask** do libuv quản lý:
+Event Loop = **vòng lặp trên main thread**, liên tục đi qua **6 phases theo thứ tự cố định**. Mỗi phase có **1 queue riêng**:
 
 ```
    ┌───────────────────────────┐
@@ -273,7 +278,7 @@ Mỗi phase trong Event Loop là **một hàng đợi macrotask** do libuv quả
 │  │   3. IDLE, PREPARE        │ ← Internal (Node.js dùng nội bộ)
 │  └─────────────┬─────────────┘
 │  ┌─────────────▼─────────────┐
-│  │      4. POLL              │ ← ⭐ Quan trọng nhất: lấy I/O events mới
+│  │      4. POLL ⭐           │ ← I/O callbacks (fs, network xong...)
 │  └─────────────┬─────────────┘
 │  ┌─────────────▼─────────────┐
 │  │      5. CHECK             │ ← setImmediate()
@@ -281,16 +286,34 @@ Mỗi phase trong Event Loop là **một hàng đợi macrotask** do libuv quả
 │  ┌─────────────▼─────────────┐
 │  │   6. CLOSE CALLBACKS      │ ← socket.on('close', ...)
 └──┴───────────────────────────┘
+  ← MỖI VÒNG = 1 "TICK"
 ```
 
-| Phase | Chứa callback từ | Mô tả |
-|-------|------------------|-------|
-| **Timers** | `setTimeout()`, `setInterval()` | Thực thi callbacks đã đến hạn (delay ≥ threshold) |
-| **Pending Callbacks** | System errors, deferred I/O | I/O callbacks bị hoãn từ vòng trước (ít gặp) |
-| **Idle, Prepare** | Internal | Node.js dùng nội bộ, developer không cần quan tâm |
-| **Poll** | I/O events mới | ⭐ Lấy I/O events từ OS (network, file), thực thi callbacks. Nếu queue rỗng → **chờ ở đây** |
-| **Check** | `setImmediate()` | Chạy ngay sau Poll phase |
-| **Close Callbacks** | Close events | `socket.on('close')`, `server.on('close')` |
+| # | Phase | Queue chứa gì | Ví dụ cụ thể |
+|---|-------|---------------|------|
+| 1 | **Timers** | `setTimeout`, `setInterval` đã **hết hạn** | `setTimeout(fn, 1000)` → sau 1s, fn vào queue này |
+| 2 | **Pending** | I/O callbacks bị **hoãn** từ vòng trước | Một số system errors (hiếm gặp) |
+| 3 | **Idle/Prepare** | Node.js dùng **nội bộ** | Bạn không cần quan tâm |
+| 4 | **Poll** ⭐ | Callbacks **I/O hoàn tất** | `fs.readFile()` xong, HTTP response về |
+| 5 | **Check** | `setImmediate()` | `setImmediate(fn)` → fn vào đây |
+| 6 | **Close** | `close` events | `socket.on('close', fn)` |
+
+### 2.3.1 Poll phase — Tại sao quan trọng nhất?
+
+Poll là nơi Event Loop **dành phần lớn thời gian**. Logic đơn giản:
+
+```
+Vào Poll phase:
+  1. Có callbacks trong Poll queue?     → Chạy hết (xen kẽ microtask)
+  2. Poll queue rỗng?
+     a. Có setImmediate() đợi?          → Chuyển sang CHECK phase
+     b. Có timer sắp hết hạn?           → Chuyển về TIMERS phase
+     c. Không có gì?                    → ĐỢI Ở ĐÂY cho đến khi:
+                                           • I/O mới hoàn tất
+                                           • Hoặc timer hết hạn
+```
+
+> 💡 Khi server Node.js "idle" (không có request), Event Loop đang **đợi ở Poll phase**, chờ I/O event mới.
 
 > 📌 **Cập nhật Node.js 20+ (libuv 1.45.0):** Từ libuv 1.45.0, Event Loop chạy Timers phase **chỉ sau Poll phase**, thay vì cả trước và sau như trước đây. Điều này có thể ảnh hưởng thứ tự giữa `setImmediate()` và timers trong một số edge cases.
 
@@ -342,36 +365,56 @@ Mỗi phase trong Event Loop là **một hàng đợi macrotask** do libuv quả
 Đây là phần **quan trọng nhất** cần nắm:
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                 THUẬT TOÁN THỰC THI                      │
-│                                                          │
-│  Bước 1:  Chạy hết code ĐỒNG BỘ (Call Stack)           │
-│           ↓                                              │
-│  Bước 2:  Quét sạch Microtask Queue:                    │
-│           → Chạy HẾT nextTick queue                     │
-│           → Chạy HẾT Promise queue                      │
-│           ↓                                              │
-│  Bước 3:  Lấy 1 callback từ Macrotask (phase hiện tại) │
-│           ↓                                              │
-│  Bước 4:  Quét sạch Microtask Queue LẦN NỮA            │
-│           → Chạy HẾT nextTick queue                     │
-│           → Chạy HẾT Promise queue                      │
-│           ↓                                              │
-│  Bước 5:  Quay lại Bước 3 (lấy macrotask tiếp theo)    │
-│           Hết macrotask trong phase → chuyển phase       │
-└─────────────────────────────────────────────────────────┘
+1 VÒNG LẶP (1 tick) — Node.js v11+:
 
-Công thức dễ nhớ:
-  Sync → All Microtasks
-  → 1 Macrotask → All Microtasks
-  → 1 Macrotask → All Microtasks
-  → ...
+  ┌─ Chuẩn bị vào TIMERS phase
+  │    → quét nextTick queue (HẾT)
+  │    → quét Promise queue (HẾT)
+  │
+  │  Vào TIMERS phase:
+  │    → chạy callback_1 → quét nextTick → quét Promise
+  │    → chạy callback_2 → quét nextTick → quét Promise
+  │    → ... hết queue → chuyển phase ↓
+  │
+  │  Chuẩn bị vào POLL phase
+  │    → quét nextTick → quét Promise
+  │
+  │  Vào POLL phase:
+  │    → chạy I/O callback_1 → quét nextTick → quét Promise
+  │    → chạy I/O callback_2 → quét nextTick → quét Promise
+  │    → ... hết queue (hoặc đợi I/O) → chuyển phase ↓
+  │
+  │  Chuẩn bị vào CHECK phase
+  │    → quét nextTick → quét Promise
+  │
+  │  Vào CHECK phase:
+  │    → chạy setImmediate_1 → quét nextTick → quét Promise
+  │    → ... hết queue → chuyển phase ↓
+  │
+  └─ (Close → quay lại Timers → vòng mới)
+```
+
+**Công thức dễ nhớ:**
+```
+Sync code → quét ALL microtask
+→ 1 macrotask → quét ALL microtask
+→ 1 macrotask → quét ALL microtask
+→ ... (hết phase queue → chuyển phase tiếp)
+
+Microtask được quét ở 2 thời điểm:
+  ✅ TRƯỚC khi vào mỗi phase
+  ✅ SAU MỖI callback trong phase
+
+→ Microtask LUÔN LUÔN chạy trước bất kỳ macrotask nào
+→ Đây là lý do nextTick/Promise có ƯU TIÊN CAO NHẤT
 ```
 
 > ⚠️ **Thay đổi quan trọng ở Node.js v11+:**
-> - **Trước v11:** Node.js chạy **HẾT tất cả callbacks** trong 1 phase rồi mới quét microtask.
-> - **Từ v11+:** Node.js chạy **1 callback** → quét microtask → 1 callback → quét microtask (giống browser).
-> - Điều này ảnh hưởng thứ tự output trong một số edge cases.
+>
+> | Version | Behavior |
+> |---------|----------|
+> | **Node < v11** | Chạy **HẾT** callbacks trong 1 phase → rồi mới quét microtask |
+> | **Node ≥ v11** | Chạy **1 callback** → quét microtask → callback tiếp (giống browser) |
 
 ### 2.6 Ví dụ 1 — Cơ bản: Đoán output
 

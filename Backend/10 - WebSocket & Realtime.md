@@ -1,12 +1,12 @@
-# WebSocket & Realtime
+# WebSocket & Thời gian thực — WebSocket & Realtime
 
-> **Kiến thức realtime** — WebSocket, Socket.IO, SSE, Long Polling. Biết để trả lời: "Bạn implement chat/notifications thời gian thực thế nào?"
+> Tài liệu ôn tập phỏng vấn — kiến thức giao tiếp thời gian thực (realtime): WebSocket (kết nối hai chiều), Socket.IO (thư viện thời gian thực), SSE (sự kiện gửi từ server), Long Polling (hỏi vòng dài). Biết để trả lời: "Bạn triển khai chat/thông báo thời gian thực thế nào?"
 
 ---
 
-# 1. HTTP Polling vs SSE vs WebSocket
+# 1. So sánh các phương thức giao tiếp thời gian thực (HTTP Polling, SSE, WebSocket)
 
-## Short Polling
+## Short Polling (Hỏi vòng ngắn)
 
 ```
 Client ──► GET /messages (mỗi 3 giây)
@@ -19,7 +19,7 @@ Server ──► 200 [{message: "Hi!"}] ← có tin nhắn mới!
 
 **Nhược điểm**: Tốn bandwidth (request liên tục), delay (chờ interval), server load cao.
 
-## Long Polling
+## Long Polling (Hỏi vòng dài)
 
 ```
 Client ──► GET /messages     ← request "treo"
@@ -31,7 +31,7 @@ Client ──► GET /messages     ← lập tức request lại
 
 **Cải thiện**: Ít request liên tục hơn, response nhanh hơn khi có data. Vẫn overhead mỗi lần reconnect.
 
-## SSE (Server-Sent Events)
+## SSE (Server-Sent Events — Sự kiện gửi từ server)
 
 ```
 Client ──► GET /events (Accept: text/event-stream)
@@ -41,10 +41,10 @@ Server ──► 200 OK (keep connection open)
            ...                                    ← server tiếp tục push
 ```
 
-**Đặc điểm**:
-- **Unidirectional** — chỉ server → client
-- Dùng HTTP thường, auto-reconnect
-- Dùng cho: notifications, live feed, stock prices
+**Đặc điểm:**
+- **Đơn hướng (Unidirectional)** — chỉ server → client (client không gửi lại được)
+- Dùng giao thức HTTP thường, tự động kết nối lại (auto-reconnect)
+- Phù hợp khi: thông báo (notifications), dòng tin trực tiếp (live feed), giá cổ phiếu
 
 ## WebSocket
 
@@ -56,27 +56,27 @@ Client ◄──────────── Full-duplex ───────
            cả 2 phía gửi messages bất kỳ lúc nào
 ```
 
-**Đặc điểm**:
-- **Bidirectional** — cả client VÀ server gửi nhận
-- Persistent connection (không reconnect)
-- Dùng cho: chat, gaming, collaborative editing
+**Đặc điểm:**
+- **Hai chiều (Bidirectional)** — cả client VÀ server đều gửi nhận được
+- Kết nối liên tục (persistent connection) — không cần kết nối lại
+- Phù hợp khi: nhắn tin (chat), trò chơi trực tuyến (gaming), soạn thảo cộng tác (collaborative editing)
 
-### So sánh tổng quan
+### Bảng so sánh tổng quan
 
 | | Short Polling | Long Polling | SSE | WebSocket |
 |---|---|---|---|---|
-| **Direction** | Client → Server | Client → Server | Server → Client | Bidirectional |
-| **Connection** | New mỗi request | ½ persistent | Persistent | Persistent |
-| **Latency** | 🔴 Cao (interval) | 🟡 Trung bình | 🟢 Thấp | 🟢 Thấp |
-| **Overhead** | 🔴 Cao | 🟡 Trung bình | 🟢 Thấp | 🟢 Thấp |
-| **Complexity** | 🟢 Đơn giản | 🟡 Trung bình | 🟢 Đơn giản | 🟡 Phức tạp |
-| **Use case** | Legacy, đơn giản | Tương thích cao | Notifications | Chat, gaming |
+| **Hướng** | Client → Server | Client → Server | Server → Client | Hai chiều (Bidirectional) |
+| **Kết nối** | Tạo mới mỗi lần | Nửa liên tục | Liên tục (Persistent) | Liên tục (Persistent) |
+| **Độ trễ** | 🔴 Cao (chờ khoảng lặp) | 🟡 Trung bình | 🟢 Thấp | 🟢 Thấp |
+| **Chi phí** | 🔴 Cao (yêu cầu liên tục) | 🟡 Trung bình | 🟢 Thấp | 🟢 Thấp |
+| **Độ phức tạp** | 🟢 Đơn giản | 🟡 Trung bình | 🟢 Đơn giản | 🟡 Phức tạp |
+| **Phù hợp khi** | Legacy, đơn giản | Tương thích cao | Thông báo, dòng tin | Chat, trò chơi |
 
 ---
 
-# 2. WebSocket Protocol — Chi tiết
+# 2. Giao thức WebSocket — Chi tiết
 
-## Handshake (HTTP Upgrade)
+## Bắt tay (Handshake) — nâng cấp từ HTTP
 
 ```
 Client request:
@@ -96,7 +96,7 @@ Sec-WebSocket-Accept: s3pPLMBiTxaQ9k...  ← hash(Key + magic GUID)
 
 Sau handshake → **TCP connection** chuyển thành WebSocket → gửi nhận frames.
 
-## WebSocket Frames
+## Khung dữ liệu WebSocket (WebSocket Frames)
 
 ```
 Mỗi message được gửi dưới dạng "frame":
@@ -110,29 +110,29 @@ Mỗi message được gửi dưới dạng "frame":
 └──────────┴──────────┴─────────────┘
 ```
 
-## Heartbeat (Ping/Pong)
+## Nhịp tim (Heartbeat — Ping/Pong)
 
-Server gửi **PING** → Client trả **PONG** → xác nhận connection còn sống.
-Nếu không nhận PONG sau timeout → connection dead → close + reconnect.
+Server gửi khung **PING** → Client trả khung **PONG** → xác nhận kết nối còn sống.
+Nếu không nhận PONG sau thời gian chờ (timeout) → kết nối đã chết → đóng + kết nối lại.
 
 ---
 
 # 3. Socket.IO
 
-## Là gì?
+## Khái niệm
 
-Socket.IO **KHÔNG phải WebSocket**. Nó là một library build **trên** WebSocket với nhiều features bổ sung:
-- Auto reconnection
-- Fallback (polling → WebSocket)
-- Rooms & Namespaces
-- Acknowledgements
-- Binary support
+Socket.IO **KHÔNG PHẢI WebSocket**. Nó là một thư viện được xây dựng **trên** WebSocket với nhiều tính năng bổ sung:
+- Tự động kết nối lại (auto reconnection)
+- Phương án dự phòng (fallback): polling → WebSocket
+- Phòng (Rooms) & Không gian tên (Namespaces)
+- Xác nhận (Acknowledgements)
+- Hỗ trợ dữ liệu nhị phân (Binary support)
 
 ```
 Socket.IO = WebSocket + Polling fallback + Extra features
 ```
 
-## Rooms & Namespaces
+## Phòng và Không gian tên (Rooms & Namespaces)
 
 ```typescript
 // Namespace — tách logic (như routes)
@@ -155,7 +155,7 @@ chatNamespace.on('connection', (socket) => {
 });
 ```
 
-## Acknowledgements
+## Xác nhận (Acknowledgements)
 
 ```typescript
 // Client gửi + chờ xác nhận từ server
@@ -173,7 +173,7 @@ socket.on('send-message', (data, callback) => {
 
 ---
 
-# 4. NestJS WebSocket Gateway
+# 4. Cổng WebSocket trong NestJS (NestJS WebSocket Gateway)
 
 ```typescript
 @WebSocketGateway({
@@ -227,9 +227,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
 ---
 
-# 5. Scaling WebSocket
+# 5. Mở rộng WebSocket (Scaling WebSocket)
 
-## Vấn đề
+## Vấn đề khi có nhiều server
 
 ```
 Server 1: [User A, User B] ← connected
@@ -238,7 +238,7 @@ Server 2: [User C, User D] ← connected
 User A gửi message tới room có User D → User D ở Server 2 → KHÔNG nhận được!
 ```
 
-## Giải pháp — Redis Adapter
+## Giải pháp — Redis Adapter (Bộ chuyển đổi Redis)
 
 ```
 Server 1 ──┐                ┌── Server 2
@@ -271,9 +271,9 @@ await redisAdapter.connectToRedis();
 app.useWebSocketAdapter(redisAdapter);
 ```
 
-## Sticky Sessions
+## Phiên cố định (Sticky Sessions)
 
-Khi dùng Socket.IO (có HTTP polling fallback) + Load Balancer → client phải luôn kết nối tới **CÙNG server** (vì polling dùng HTTP, mỗi request có thể tới server khác).
+Khi dùng Socket.IO (có phương án dự phòng HTTP polling) kết hợp với bộ cân bằng tải → client phải luôn kết nối tới **CÙNG server** (vì polling dùng HTTP, mỗi yêu cầu có thể tới server khác → mất phiên).
 
 ```nginx
 # Nginx sticky session
@@ -295,14 +295,14 @@ server {
 
 ---
 
-# 6. Chốt — Câu hỏi phỏng vấn thường gặp
+# 6. Câu hỏi phỏng vấn thường gặp
 
-| Câu hỏi | Key answer |
+| Câu hỏi | Gợi ý trả lời |
 |---|---|
-| WebSocket vs HTTP? | HTTP: request-response, stateless. WebSocket: persistent, bidirectional, full-duplex |
-| WebSocket vs SSE? | WebSocket: bidirectional. SSE: server → client only. SSE đơn giản hơn, WebSocket linh hoạt hơn |
-| Socket.IO có phải WebSocket? | Không. Socket.IO build trên WebSocket + polling fallback + rooms + namespaces + acknowledgements |
-| Room vs Namespace? | Namespace: tách logic (routes). Room: group sockets trong 1 namespace |
-| Scale WebSocket thế nào? | Redis adapter (pub/sub giữa servers) + sticky sessions cho polling fallback |
-| Khi nào dùng WebSocket? | Chat, gaming, collaborative editing — cần bidirectional + low latency |
-| Khi nào dùng SSE? | Notifications, live feed — chỉ server push, không cần client → server |
+| WebSocket khác HTTP thế nào? | HTTP: yêu cầu-phản hồi (request-response), không trạng thái (stateless). WebSocket: kết nối liên tục (persistent), hai chiều (bidirectional), song công toàn phần (full-duplex) |
+| WebSocket khác SSE thế nào? | WebSocket: hai chiều (client và server đều gửi được). SSE: chỉ server gửi về client (đơn hướng). SSE đơn giản hơn, WebSocket linh hoạt hơn |
+| Socket.IO có phải WebSocket không? | Không. Socket.IO được xây dựng trên WebSocket + phương án dự phòng polling + phòng (rooms) + không gian tên (namespaces) + xác nhận (acknowledgements) |
+| Room khác Namespace thế nào? | Namespace: tách logic (đường đi — routes). Room: gộp nhóm các socket trong cùng 1 namespace |
+| Mở rộng (scale) WebSocket thế nào? | Dùng Redis Adapter (xuất bản/đăng ký giữa các server — pub/sub) + phiên cố định (sticky sessions) cho phương án dự phòng polling |
+| Khi nào dùng WebSocket? | Nhắn tin (chat), trò chơi trực tuyến (gaming), soạn thảo cộng tác — cần hai chiều + độ trễ thấp |
+| Khi nào dùng SSE? | Thông báo (notifications), dòng tin trực tiếp (live feed) — chỉ cần server đẩy dữ liệu về client, không cần client gửi ngược lại |

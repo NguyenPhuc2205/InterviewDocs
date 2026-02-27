@@ -1,6 +1,6 @@
-# Nginx & Deploy — Kiến Trúc Bên Trong & Quy Trình Triển Khai
+# Nginx & Triển khai ứng dụng — Kiến Trúc Bên Trong & Quy Trình Deploy
 
-> **Kiến thức DevOps nền tảng** — Nginx architecture, event-driven model, proxy internals, SSL/TLS, và quy trình deploy ứng dụng web từ code → production. Biết để trả lời "Hệ thống của bạn deploy thế nào?"
+> Tài liệu ôn tập phỏng vấn — kiến thức DevOps nền tảng: kiến trúc bên trong Nginx (architecture), mô hình hướng sự kiện (event-driven model), cơ chế reverse proxy, SSL/TLS, Docker (container hoá), CI/CD (tích hợp và triển khai liên tục), và quy trình đưa ứng dụng web từ code → production. Biết để trả lời: "Hệ thống của bạn triển khai (deploy) thế nào?"
 
 ---
 
@@ -848,7 +848,7 @@ docker compose up -d --build
 
 ---
 
-# 10. CI/CD Pipeline
+# 10. CI/CD Pipeline (Tích hợp và Triển khai liên tục)
 
 ## CI/CD là gì?
 
@@ -932,17 +932,17 @@ jobs:
 
 # 11. Câu hỏi phỏng vấn
 
-| Câu hỏi | Key answer |
+| Câu hỏi | Gợi ý trả lời |
 |---|---|
-| Nginx là gì? Tại sao dùng? | Web server + reverse proxy + load balancer. Event-driven model → xử lý hàng nghìn connections với ít RAM |
-| Nginx xử lý được nhiều connection bằng cách nào? | Event-driven + non-blocking I/O (epoll/kqueue). 1 worker process xử lý hàng nghìn connections, không tạo thread/process cho mỗi connection |
-| Master vs Worker process? | Master: đọc config, quản lý workers, bind ports. Worker: xử lý requests, chạy event loop. Số workers = CPU cores |
-| Nginx reload config có downtime không? | Không! Graceful reload: tạo workers mới → workers cũ xong requests đang xử lý → tự tắt → zero downtime |
-| SSL Termination là gì? | Nginx xử lý HTTPS (chặng client ↔ Nginx), forward HTTP tới backend (chặng Nginx ↔ backend). Backend không cần lo SSL |
-| TLS Handshake? | ClientHello → ServerHello (certificate) → Key exchange → Symmetric encryption. TLS 1.3: 1 RTT |
-| Location matching priority? | Exact (`=`) → Prefix stop (`^~`) → Regex (`~` `~*`) → Prefix → Catch-all (`/`) |
-| Docker container vs VM? | Container: share host OS kernel, nhẹ (MB), start <1s. VM: có guest OS riêng, nặng (GB), start chậm |
-| Multi-stage Docker build? | Stage 1: build (compile, install devDependencies). Stage 2: chỉ copy files cần thiết → image nhỏ hơn đáng kể |
-| CI/CD là gì? | CI: tự động test + build khi push code. CD: tự động deploy khi CI pass. Giảm lỗi, tăng tốc release |
-| Zero-downtime deploy? | Dùng rolling update: container mới start → health check pass → route traffic → stop container cũ |
-| Reverse proxy vs Load balancer? | Reverse proxy: forward requests tới backend, ẩn infrastructure. Load balancer: phân phối requests tới NHIỀU backends. Nginx làm cả hai |
+| Nginx là gì? Tại sao dùng? | Web server + reverse proxy (proxy ngược) + cân bằng tải (load balancer). Mô hình hướng sự kiện (event-driven) → xử lý hàng nghìn kết nối với rất ít RAM |
+| Nginx xử lý được nhiều kết nối bằng cách nào? | Hướng sự kiện (event-driven) + I/O không chặn (non-blocking I/O) qua epoll/kqueue. 1 worker process xử lý hàng nghìn kết nối, không tạo luồng/tiến trình riêng cho mỗi kết nối |
+| Master khác Worker process thế nào? | Master: đọc cấu hình, quản lý worker, gắn cổng (bind port). Worker: xử lý yêu cầu, chạy vòng lặp sự kiện (event loop). Số worker = số lõi CPU |
+| Nginx tải lại cấu hình có ngừng hoạt động không? | Không! Tải lại mượt (graceful reload): tạo worker mới → worker cũ hoàn thành các yêu cầu đang xử lý → tự tắt → không mất kết nối nào (zero downtime) |
+| SSL Termination (chấm dứt SSL) là gì? | Nginx xử lý HTTPS (đoạn client ↔ Nginx), chuyển tiếp (forward) HTTP tới backend (đoạn Nginx ↔ backend). Backend không cần lo SSL |
+| TLS Handshake (bắt tay TLS) là gì? | ClientHello → ServerHello (chứng chỉ) → Trao đổi khoá → Mã hoá đối xứng (AES). TLS 1.3 chỉ cần 1 RTT (khứ hồi) |
+| Thứ tự ưu tiên location trong Nginx? | Bằng chính xác (`=`) → Tiền tố dừng (`^~`) → Biểu thức chính quy (`~` `~*`) → Tiền tố thường → Bắt tất cả (`/`) |
+| Docker Container khác VM (máy ảo) thế nào? | Container: dùng chung nhân hệ điều hành, nhẹ (vài MB), khởi động dưới 1 giây. VM: có hệ điều hành khách riêng, nặng (vài GB), khởi động chậm |
+| Multi-stage Docker build là gì? | Giai đoạn 1: build (biên dịch, cài devDependencies). Giai đoạn 2: chỉ sao chép file cần thiết → image nhỏ hơn đáng kể |
+| CI/CD là gì? | CI (tích hợp liên tục): tự động kiểm tra + build khi gửi code. CD (triển khai liên tục): tự động đưa lên production khi CI thành công. Giảm lỗi, tăng tốc phát hành |
+| Triển khai không ngừng hoạt động (zero-downtime deploy)? | Dùng cập nhật luân phiên (rolling update): container mới khởi động → kiểm tra sức khoẻ (health check) thành công → chuyển lưu lượng → dừng container cũ |
+| Reverse proxy khác Load balancer thế nào? | Reverse proxy (proxy ngược): chuyển tiếp yêu cầu tới backend, ẩn hạ tầng. Load balancer (cân bằng tải): phân phối yêu cầu tới NHIỀU backend. Nginx làm được cả hai |
